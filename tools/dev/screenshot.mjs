@@ -137,6 +137,10 @@ await shot('03-menu')
 const switched = await clickBySelector('[data-dshw="src-magpie"]')
 console.log('switch to magpie clicked:', switched)
 await sleep(2600)
+// 关键断言：按钮高亮必须跟着切（历史 bug：var 初始化把元素引用抹成 null ⇒ 高亮永远不动，
+// 用户看到的就是"按钮点不动"，虽然状态其实已经切了）
+const hl = await evaluate("(function(){var m=document.querySelector('[data-dshw=\"src-magpie\"]'),d=document.querySelector('[data-dshw=\"src-deepseek\"]');if(!m||!d)return 'no btns';return {magpieBg:m.style.background,deepBg:d.style.background,magpieColor:m.style.color,deepColor:d.style.color}})()")
+console.log('source buttons highlight:', JSON.stringify(hl))
 // 关菜单（点 ☰），再点鲸鱼看主显示
 await clickBySelector('.dshwv-menu-btn')
 await sleep(400)

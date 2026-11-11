@@ -19610,6 +19610,11 @@ function setDisplaySource(v, opts) {
   if (!changed) return
   try { render() } catch (err) {}
   if (opts && opts.silent) return
+  // 立刻给一次可见反馈：切换只改"显示哪一套数字"，界面别的地方不会变，
+  // 没有提示的话用户很容易以为按钮没生效（本批就被这么反馈过）。
+  try {
+    dshwvToast(next === 'magpie' ? '主显示已切到 Magpie（剩余额度 + 今日折算）' : '主显示已切回 DeepSeek 余额', 'ok', 1600)
+  } catch (err) {}
   try { saveConfig() } catch (err) {}
   // 切到 Magpie：立刻要一次最新数据（不等下个 60 秒周期）
   if (next === 'magpie') {
@@ -19624,12 +19629,18 @@ function setDisplaySource(v, opts) {
 }
 function syncDisplaySourceUI() {
   try {
-    if (!srcDeepBtn || !srcMagpieBtn) return
+    // 双保险：引用被意外清掉（历史上被 `var x = null` 抹过一次）时按 data-dshw 重新找，
+    // 保证"高亮不跟着状态走"这种事不会再静默发生。
+    var d = srcDeepBtn || document.querySelector('[data-dshw="src-deepseek"]')
+    var m = srcMagpieBtn || document.querySelector('[data-dshw="src-magpie"]')
+    if (!d || !m) return
+    if (!srcDeepBtn) srcDeepBtn = d
+    if (!srcMagpieBtn) srcMagpieBtn = m
     var on = displaySource === 'magpie'
-    srcDeepBtn.style.background = on ? 'transparent' : '#203170'
-    srcDeepBtn.style.color = on ? '#203170' : '#fff'
-    srcMagpieBtn.style.background = on ? '#203170' : 'transparent'
-    srcMagpieBtn.style.color = on ? '#fff' : '#203170'
+    d.style.background = on ? 'transparent' : '#203170'
+    d.style.color = on ? '#203170' : '#fff'
+    m.style.background = on ? '#203170' : 'transparent'
+    m.style.color = on ? '#fff' : '#203170'
   } catch (err) {}
 }
 function express() {
@@ -19879,8 +19890,12 @@ var displaySource = 'deepseek'
 // 主显示用的 Magpie 视图（宿主随 /dsh-whale/balance.json 一起下发，见 magpieDisplayPayload）
 var magpieView = null
 // 菜单里「显示数据源」那两个按钮（建的时候写进来，syncDisplaySourceUI 只改它们的样式）
-var srcDeepBtn = null
-var srcMagpieBtn = null
+// ⚠️ 这两个**不在这里赋 null**：主菜单那一行在文件更早的位置（约 L2247）就建好按钮并写进这两个变量了，
+//   `var x = null` 是运行到这里才执行的语句，再来一次会把早先写进去的元素抹掉 ——
+//   syncDisplaySourceUI() 随即在第 1 行就 early-return，表现是"点了 Magpie 按钮一点反应都没有"
+//   （高亮不换、看起来像点不动；实际状态已经切了）。和 magpieRowTextEl 是同一个坑，本批踩了两次。
+var srcDeepBtn
+var srcMagpieBtn
 // issue #116：Codex 本机统计开关。关掉后宿主完全不扫 ~/.codex/sessions（适合会话日志很大的机器）。
 // v748：默认值仍是「开」，但**宿主会先看有没有 Codex 模型** —— 没配就一律按关闭处理，
 // 所以这里保持默认 true 是安全的（不会让没配 Codex 的用户被扫盘），也不会因为一次普通保存
