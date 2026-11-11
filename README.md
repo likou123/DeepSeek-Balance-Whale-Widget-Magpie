@@ -111,6 +111,31 @@ DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图
 - 🎯 **额度**：该模型的「额度」里，已用来源可选 **Codex 本地会话 token**（不重置＝累计−基准、每日＝今日、每月＝本月），复用同一套展示与泡泡模块
 - 🪟 **订阅窗口（5h / 周）**：日志里的 `rate_limits` 带窗口快照，有 ChatGPT 订阅时子菜单自动追加 `5h 已用 x% · 2小时30分后重置 | 周 已用 y% · 3天后重置`（字段名已做容错；API-key 计费或无订阅时该行不显示）
 
+### Magpie 模式（本地网关 token 用量）
+
+> ℹ️ **和「今日已用」是什么关系**：两者是**并行的两套口径**，**不能相加**。「今日已用」来自 DeepSeek 余额的观测差；
+> 这一节统计的是 **Magpie 网关记到的全部 agent 请求**（DSH、Codex、Claude Code、Gemini CLI……都算在内），
+> 所以它通常比「今日已用」大，也**不参与**余额记账。
+
+[Magpie](https://github.com/yetone/magpie) 是本机网关（默认 `127.0.0.1:3425`），所有 agent 的请求都从它出去，因此它手里有**全量** token 账。
+挂件读两个来源，互为兜底：
+
+- 🌐 **网关接口** `GET {base}/v1/magpie/usage?period=…` —— 拿连通状态与它自己聚合的数字，并拿到 `usage.jsonl` 的**真实路径**（字段 `path`，便携版/自定义数据目录也能找到）。
+- 📂 **明细文件 `usage.jsonl`**（通常 `~/.config/magpie/usage.jsonl`，可用 `MAGPIE_USAGE_FILE` / `MAGPIE_HOME` 指定）—— 每行一条请求，带时间戳、agent、模型、`in`/`out`/`cache_read`/`reasoning`。逐条时间戳意味着能**按当时的高峰/空闲时段**套价，这是网关聚合数字给不了的（那边 `cost` 是美元列表价，第三方 provider 往往整批 `unpriced`）。
+
+看到什么：
+
+- 主菜单多一行 **「Magpie 用量」**：`今日 4721 万 tok · ¥ 2.76`，点「查看」打开统计窗口。
+- 统计窗口里：**今日 / 近 7 天 / 本月 / 累计**四段（调用次数、失败数、输入、缓存命中及其命中率、输出与其中的思考 token、合计 tokens、折算金额）；**今日按模型**、**今日按 agent** 的拆分；**近 14 天**逐日列表。
+- 设置项：**开关**（关掉后宿主完全不读 Magpie，不联网也不读文件）与**网关地址**（默认 `http://127.0.0.1:3425`；被环境变量 `MAGPIE_BASE_URL` 锁定时输入框禁用）。
+
+口径与限制（界面上也有同样的说明）：
+
+- 💰 金额 = 用本挂件自己的 DeepSeek 价表（`PRICING` / 自定义单价，峰谷按**每条请求的时间戳**判定）折算的**等价人民币**，标「估算」——它不是 Magpie 的账单，也不是 DeepSeek 的实际扣费。
+- 🧮 只读：不写 Magpie 的任何文件；挂件自己的设置存 `$DSH_HOME/.dshw-magpie.json`。
+- 🚫 网关没开、文件也找不到时，面板**直说"未连接"并给出可执行的原因**，不会用 0 冒充。
+- 📉 明细文件超过 64 MiB 时只读尾部 16 MiB（够覆盖近期；历史全量重扫会卡事件循环）。
+
 ## 目录结构
 
 ```text
@@ -149,6 +174,7 @@ dsh-whale-widget/
 | `.dshw-api.json` | 自定义 API 模型注册表（厂商 / 凭据名 / 接口字段 / 自定义单价 / 额度与用量累计；**不含密钥**） |
 | `.dshw-usage-archive.json` | 账本归档（超过保留期的逐轮明细与逐日汇总；明细 90 天/2 万条、逐日 365 天） |
 | `.dshw-codex.json` | Codex 本地会话统计缓存（按天/模型聚合 + 文件偏移；**不含任何凭据**） |
+| `.dshw-magpie.json` | Magpie 用量统计的设置（开关 + 网关地址；**不存任何凭据**，也不保存用量明细） |
 | `whale-roles/` | 自定义角色图 + `roles.json` 索引 |
 | `whale-audio/` | 音频片段 `<id>.wav` + `audio.json` 索引（音效组/片段） |
 | `whale-bubble-imgs/` | 泡泡图库图片 + `bubble-imgs.json` 索引 |
@@ -414,9 +440,11 @@ curl http://127.0.0.1:3080/dsh-whale/audio.json
 - `/dsh-whale/wait.json` → 200 JSON，含 `{ok:true, pending}`；`pending` 为当前挂起的「提问 / 授权」（`{kind:'question'|'approval', id, ts}`）或 `null` —— 这是「提问提示 / 授权提示」音效与常驻气泡的数据源（默认每秒轮询一次）
 - `/dsh-whale/about.json` → 200 JSON：菜单底部版号那行点开后的「关于 / 自检」面板数据源（版本、通道、文件路径与时间、数据落点、记账/余额/Codex 状态；路径已脱敏，**点开才请求**）
 - `/dsh-whale/update-check.json` → 200 JSON：检查更新（`{ok, current, latest, hasUpdate, source}`）；**点了才联网**，镜像优先（npmmirror → jsdelivr → unpkg → npmjs）+ `npm view` 兜底，宿主侧 10 分钟缓存
+- `/dsh-whale/magpie.json` → 200 JSON：Magpie 网关用量快照（今日 / 近 7 天 / 本月 / 累计的 token 与折算金额、按模型与按 agent 的拆分、网关连通状态；`?refresh=1` 强制重扫）。**不影响**「今日已用」的余额口径
+- `/dsh-whale/magpie-settings.json` → GET 返回 `{ok, on, url, defaultUrl}`；PUT 写入 `{on, url}`（存 `$DSH_HOME/.dshw-magpie.json`）
 - 浏览器 F5 后右下角出现挂件
 
-> ⚠️ **关于上面这些 `curl`**：全部 **26 个** `/dsh-whale/*` 路由都已接入 **DSH 浏览器信任栅栏**（`connection.requestRejection`）。
+> ⚠️ **关于上面这些 `curl`**：全部 **28 个** `/dsh-whale/*` 路由都已接入 **DSH 浏览器信任栅栏**（`connection.requestRejection`）。
 > 因此**不带会话凭据的裸 `curl` 会返回 401**（伪造 `Host` 头则是 403）—— 这是预期行为，不是接口坏了。
 > 想验证接口是否存活，看返回 **401/403** 即说明路由已注册且栅栏在工作；在浏览器里访问同一条路径（带会话）才是 200。
 > 另外**自 0.3.15 起，写请求（`POST`/`PUT`/`PATCH`/`DELETE`）还必须是本机来源**（Host 为 `127.0.0.1`/`localhost`/`[::1]`），否则 403 —— 详见上方「安全边界」。
@@ -473,6 +501,10 @@ curl http://127.0.0.1:3080/dsh-whale/audio.json
 - 仓库里 `lib/index.js` 是宿主本体、`lib/accounting.mjs` 是记账内核（定点金额运算 + 观测/校正账本）、`assets/whale-widget.js` 是前端本体；宿主改动（含记账内核）需重启 `dsh web`，仅前端改动硬刷新页面即生效。
 - 完整规格、视觉参数、路由清单、架构结论与生成提示词见 [`whale-widget-prompt.md`](whale-widget-prompt.md)。
 - 本地联调：`dsh plugin --profile web add link:.` 后，改前端 → Ctrl+F5；改宿主 → 重启 `dsh web`。
+- **不装 DSH 也能冒烟**（改 Magpie / 路由 / 面板后先跑这个，比反复重启宿主快）：
+  - `node tools/dev/mock-host.mjs 4300` —— 用最小 mock 的 `ctx` 把 `apply()` 跑起来，`/dsh-whale/*` 全挂在本机 4300；页面自带 `#root` + composer，挂件会正常挂载。浏览器打开 `http://127.0.0.1:4300/` 就能点开菜单看面板（余额那类是假的：没有 DSH 凭据服务；Magpie 用的是本机真实数据）。
+  - `node tools/dev/magpie-usage-check.mjs` —— Magpie 三种数据源场景（网关在线 / 网关掉线只剩 `usage.jsonl` / 机器上根本没有 Magpie）+ 设置读写往返 + 关掉开关后短路。
+  - `node tools/dev/screenshot.mjs <输出目录>` —— 配无头 Edge（脚本不负责启动浏览器，用法见文件头）自动出「挂件 / 菜单 / Magpie 窗口」截图并打印断言。
 
 ## 致谢
 

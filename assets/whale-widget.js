@@ -2224,6 +2224,36 @@ resOpenBtn.addEventListener('click', function (e) { e.stopPropagation(); openRes
 rowRes.appendChild(menuLabel('资源管理'))
 rowRes.appendChild(resOpenBtn)
 menuBox.appendChild(rowRes)
+// —— Magpie 用量（Magpie 适配）：一行摘要 + 「查看」打开统计窗口 ——
+// 放主菜单而不是「用量记录」子界面里：它是**另一套口径**（Magpie 记到的全部 agent 请求），
+// 与「今日已用」的余额观测互不相干，混在一个页面里最容易让人以为两者应该相加。
+// 摘要文本由 refreshMagpieRow() 在打开菜单时刷新（走宿主 15s 快照，不强制重扫）。
+var rowMagpie = menuRow()
+var magpieRowText = document.createElement('span')
+magpieRowText.className = 'dshwv-usage-hint'
+magpieRowText.style.flex = '1'
+magpieRowText.style.textAlign = 'right'
+magpieRowText.style.paddingRight = '6px'
+magpieRowText.style.whiteSpace = 'nowrap'
+magpieRowText.style.overflow = 'hidden'
+magpieRowText.style.textOverflow = 'ellipsis'
+magpieRowText.textContent = '读取中…'
+magpieRowTextEl = magpieRowText
+var magpieOpenBtn = document.createElement('button')
+magpieOpenBtn.type = 'button'
+magpieOpenBtn.className = 'dshwv-usage-more'
+magpieOpenBtn.style.cssText = 'flex:0 0 auto;width:auto;margin:0;padding:4px 10px'
+magpieOpenBtn.textContent = '查看'
+magpieOpenBtn.setAttribute('data-dshw', 'magpie-open')
+magpieOpenBtn.title = '查看 Magpie 网关的 token 用量（今日/近 7 天/本月/累计、按模型与 agent）'
+magpieOpenBtn.addEventListener('click', function (e) { e.stopPropagation(); openMagpieWindow() })
+rowMagpie.appendChild(menuLabel('Magpie 用量'))
+rowMagpie.appendChild(magpieRowText)
+rowMagpie.appendChild(magpieOpenBtn)
+menuBox.appendChild(rowMagpie)
+// 启动后预热一次：这样用户第一次打开菜单时那一行已经是数字（不是「读取中…」）。
+// 1.5s 是为了让宿主那边的余额/模型请求先跑，别在首屏抢带宽；失败无所谓，打开菜单还会再取。
+try { setTimeout(function () { try { refreshMagpieRow() } catch (err) {} }, 1500) } catch (err) {}
 // —— 用量记录:底部固定动作行由「用量记录 / ‹ 返回」共用(见下方 nav 行) ——
 
 // ===== 用量记录(主菜单内的子界面,不跳新页面)+ “更多消费记录”窗口 =====
@@ -2647,6 +2677,11 @@ function aboutDiagText(d) {
     if (d && d.balance) L.push('余额取数: ' + (d.balance.ok ? '成功' : '失败') + ' · ' + (d.balance.ms != null ? d.balance.ms + ' ms' : '') + ' · ' + aboutFmtTime(d.balance.at) + (d.balance.error ? (' · ' + d.balance.error) : ''))
     else L.push('余额取数: 本次会话尚未取过')
     if (d && d.codex) L.push('Codex 统计: ' + (d.codex.enabled ? ('已启用 · 最近扫描 ' + aboutFmtTime(d.codex.snapAt) + (d.codex.files != null ? (' · ' + d.codex.files + ' 个会话文件') : '')) : ('未启用（' + (d.codex.reason || '未配置') + '）')))
+    // Magpie 用量：只报开关/连通/来源（脱敏后的路径），**不含任何 token 明细**
+    if (d && d.magpie) L.push('Magpie 统计: ' + (!d.magpie.enabled ? '已关闭'
+      : (d.magpie.available
+        ? ('已启用 · 来源 ' + (d.magpie.source || '?') + ' · 网关 ' + (d.magpie.url || '?') + '（' + (d.magpie.gatewayOk ? '在线' : '不可达') + '） · 最近扫描 ' + aboutFmtTime(d.magpie.snapAt))
+        : ('未连接 —— ' + (d.magpie.reason || '没连上网关，也没找到 usage.jsonl')))))
     if (aboutSelfResult) L.push('自检: ' + aboutSelfResult + (aboutSelfDetail ? ('（' + aboutSelfDetail + '）') : ''))
     // v805：来源**只在这里**出现（行里不显示），方便贴 issue 时知道是哪条路通的
     if (aboutLastUpdate) L.push('检查更新: ' + aboutLastUpdate + (aboutUpdateSource ? ('（源 ' + aboutUpdateSource + '）') : ''))
@@ -2873,6 +2908,20 @@ function aboutRender() {
       'dshwv-about-ok')
   } else {
     row('Codex 统计', '未启用', 'Codex 统计: 未启用 —— ' + ((d.codex && d.codex.reason) || '未配置 Codex 模型'))
+  }
+  // Magpie 用量（Magpie 适配）：只报"连没连上 / 从哪读的"，点「Magpie 用量」那一行才看数字
+  if (d.magpie && d.magpie.enabled) {
+    if (d.magpie.available) {
+      row('Magpie 统计', '已启用 · ' + (d.magpie.source === 'file' ? 'usage.jsonl' : '网关聚合'),
+        'Magpie 统计: 已启用 · 来源 ' + (d.magpie.source || '?') + ' · 网关 ' + (d.magpie.url || '?') + '（' +
+        (d.magpie.gatewayOk ? '在线' : '不可达') + '） · 最近扫描 ' + aboutFmtTime(d.magpie.snapAt) +
+        (d.magpie.file ? (' · 明细 ' + d.magpie.file) : ''),
+        d.magpie.gatewayOk ? 'dshwv-about-ok' : '')
+    } else {
+      row('Magpie 统计', '未连接', 'Magpie 统计: 未连接 —— ' + (d.magpie.reason || '没连上网关，也没找到 usage.jsonl'), 'dshwv-about-bad')
+    }
+  } else {
+    row('Magpie 统计', '已关闭', 'Magpie 统计: 已在挂件设置里关闭（菜单「Magpie 用量 → 查看 → 启用」）')
   }
   // v798 起：打开面板时自动跑一次；v802（用户要求）：这两行**不复制**，点击 = 重新执行。
   actRow('自检', aboutSelfResult || '检查中…',
@@ -6239,6 +6288,331 @@ function openUsageRecordsWindow() {
     .catch(function () { usageMoreCard.innerHTML = '<div style="padding:10px;color:#203170">加载失败</div>' })
 }
 function closeUsageRecordsWindow() { usageMoreMask.style.display = 'none' }
+// ===== Magpie 用量（Magpie 适配）=====
+// 数据来自宿主 /dsh-whale/magpie.json（宿主读 Magpie 的 usage.jsonl + 网关 /v1/magpie/usage 聚合）。
+// 这一块**只管展示与两个设置项**（开关 / 网关地址）：
+//   · 不参与「今日已用」的余额记账 —— 那是另一套口径（余额观测），两者不能相加；
+//   · 也不参与「每轮消耗」—— 那个只统计 DSH 自己的会话事件。
+// 所以界面上必须写清「统计范围 = Magpie 记到的全部 agent 请求（含 DSH 自己）」。
+var MAGPIE_URL = '/dsh-whale/magpie.json'
+var MAGPIE_SET_URL = '/dsh-whale/magpie-settings.json'
+var magpieData = null // 最近一次快照
+var magpieSettings = null // { on, url, urlLocked, defaultUrl }
+var magpieLoading = false
+var magpieWaiters = []
+// ⚠️ magpieRowTextEl 故意**不在这里赋 null**：主菜单那一行在本文件更早的位置就建好了
+//   （创建时就把元素写进这个变量）。`var x = null` 的初始化是**运行到这里才执行**的语句，
+//   再来一次会把早先写进去的元素抹掉 —— 表现就是摘要永远停在「读取中…」（本批真踩过）。
+var magpieRowTextEl
+var magpieMaskEl = null
+var magpieCardEl = null
+function magpieFmtTokens(n) {
+  var v = Number(n) || 0
+  if (v >= 100000000) return (v / 100000000).toFixed(2).replace(/\.?0+$/, '') + ' 亿'
+  if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + ' 万'
+  return String(Math.round(v))
+}
+function magpieFmtPct(x) {
+  var v = Number(x)
+  if (!isFinite(v)) return '—'
+  return (v * 100).toFixed(1).replace(/\.0$/, '') + '%'
+}
+function magpieTodayAgg(d) {
+  try { return (d && d.periods && d.periods.today) || null } catch (err) { return null }
+}
+// 主菜单那一行的摘要（拿不到就直说，不显示 0 冒充）
+function magpieRowSummary(d) {
+  if (!d) return '读取中…'
+  if (d.pending) return '读取中…'
+  if (!d.enabled) return '已关闭'
+  if (!d.available) return '未连接'
+  var t = magpieTodayAgg(d)
+  if (!t) return '未连接'
+  return '今日 ' + magpieFmtTokens(t.tokens) + ' tok · ' + apiFmtMoney(t.cny, 'CNY')
+}
+function magpieApplyRowSummary() {
+  try {
+    if (!magpieRowTextEl) return
+    var s = magpieRowSummary(magpieData)
+    magpieRowTextEl.textContent = s
+    magpieRowTextEl.title = s
+  } catch (err) {}
+}
+// 拉快照：并发合并（菜单行 / 窗口 / 保存后刷新可能同时要）
+// attempt：宿主第一次可能只回 `{pending:true}`（快照还没建好，它在后台扫）⇒ 自动再取一次，
+// 否则主菜单那一行会一直停在「读取中…」直到用户重开菜单。
+function magpieLoad(force, cb, attempt) {
+  if (typeof cb === 'function') magpieWaiters.push(cb)
+  if (magpieLoading) return
+  magpieLoading = true
+  var url = MAGPIE_URL + (force ? '?refresh=1' : '')
+  fetch(url, { cache: 'no-store' })
+    .then(function (r) { return r.json() })
+    .then(function (d) {
+      magpieData = d || null
+      magpieLoading = false
+      magpieApplyRowSummary()
+      var ws = magpieWaiters
+      magpieWaiters = []
+      for (var i = 0; i < ws.length; i++) { try { ws[i](magpieData) } catch (err) {} }
+      if (d && d.pending && !force && (attempt || 0) < 3) {
+        setTimeout(function () { try { magpieLoad(false, null, (attempt || 0) + 1) } catch (err) {} }, 1200)
+      }
+    })
+    .catch(function () {
+      magpieLoading = false
+      var ws2 = magpieWaiters
+      magpieWaiters = []
+      for (var j = 0; j < ws2.length; j++) { try { ws2[j](null) } catch (err) {} }
+    })
+}
+function magpieLoadSettings(cb) {
+  fetch(MAGPIE_SET_URL, { cache: 'no-store' })
+    .then(function (r) { return r.json() })
+    .then(function (d) {
+      if (d && d.ok) magpieSettings = d
+      if (cb) cb(magpieSettings)
+    })
+    .catch(function () { if (cb) cb(magpieSettings) })
+}
+function magpieSaveSettings(patch, done) {
+  fetch(MAGPIE_SET_URL, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch || {}),
+  })
+    .then(function (r) { return r.json().catch(function () { return null }).then(function (d) { return { ok: r.ok, d: d } }) })
+    .then(function (x) {
+      var ok = x.ok && (!x.d || x.d.ok !== false)
+      if (ok && x.d && x.d.settings) magpieSettings = Object.assign({}, magpieSettings || {}, x.d.settings, { ok: true })
+      if (done) done(ok, (x.d && x.d.error) || ('HTTP ' + x.ok))
+      // 设置变了 ⇒ 立刻重扫（开关/地址都可能刚改过）
+      if (ok) magpieLoad(true, function () { try { fillMagpieWindow(magpieData) } catch (err) {} })
+    })
+    .catch(function (err) { if (done) done(false, (err && err.message) || '网络错误') })
+}
+// —— 一行「名称 ……… 右侧数值」——
+function magpieRow(labelText, valueText, titleText) {
+  var row = document.createElement('div')
+  row.className = 'dshwv-usage-row'
+  var lb = document.createElement('span')
+  lb.style.flex = '1 1 auto'
+  lb.style.minWidth = '0'
+  lb.style.overflow = 'hidden'
+  lb.style.textOverflow = 'ellipsis'
+  lb.style.whiteSpace = 'nowrap'
+  lb.textContent = labelText
+  lb.title = titleText || labelText
+  var vv = document.createElement('span')
+  vv.style.flex = '0 0 auto'
+  vv.style.color = '#203170'
+  vv.textContent = valueText
+  vv.title = titleText || valueText
+  row.appendChild(lb)
+  row.appendChild(vv)
+  return row
+}
+function magpieSection(host, titleText) {
+  var h = document.createElement('div')
+  h.className = 'dshwv-usage-subtitle'
+  h.style.margin = '10px 0 2px'
+  h.textContent = titleText
+  host.appendChild(h)
+}
+// 一个统计段（今日 / 近 7 天 / 本月 / 累计）：大字 tokens + 细项
+function magpiePeriodBlock(host, titleText, agg) {
+  var box = document.createElement('div')
+  box.style.cssText = 'padding:4px 0 6px;border-bottom:1px solid rgba(32,49,112,.10)'
+  var head = document.createElement('div')
+  head.className = 'dshwv-usage-row'
+  var t1 = document.createElement('span')
+  t1.style.flex = '1 1 auto'
+  t1.style.fontWeight = '700'
+  t1.textContent = titleText
+  var t2 = document.createElement('span')
+  t2.style.flex = '0 0 auto'
+  t2.style.fontWeight = '800'
+  t2.style.color = '#203170'
+  t2.textContent = magpieFmtTokens(agg.tokens) + ' tok · ' + apiFmtMoney(agg.cny, 'CNY')
+  head.appendChild(t1)
+  head.appendChild(t2)
+  box.appendChild(head)
+  var det = document.createElement('div')
+  det.className = 'dshwv-usage-hint'
+  det.textContent = '调用 ' + agg.calls + ' 次（失败 ' + agg.errors + '） · 输入 ' + magpieFmtTokens(agg.input)
+    + ' · 缓存命中 ' + magpieFmtTokens(agg.cacheRead) + '（' + magpieFmtPct(agg.hitRate) + '）'
+    + ' · 输出 ' + magpieFmtTokens(agg.output) + '（含思考 ' + magpieFmtTokens(agg.reasoning) + '）'
+  box.appendChild(det)
+  host.appendChild(box)
+}
+function magpieRankRows(host, titleText, list, emptyText) {
+  magpieSection(host, titleText)
+  if (!list || !list.length) {
+    var em = document.createElement('div')
+    em.className = 'dshwv-usage-hint'
+    em.textContent = emptyText || '暂无数据'
+    host.appendChild(em)
+    return
+  }
+  for (var i = 0; i < list.length; i++) {
+    var it = list[i]
+    host.appendChild(magpieRow(
+      String(it.name || '未知'),
+      magpieFmtTokens(it.tokens) + ' · ' + apiFmtMoney(it.cny, 'CNY') + ' · ' + it.calls + ' 次',
+      String(it.name || '未知') + ' · ' + magpieFmtTokens(it.tokens) + ' tokens · ' + apiFmtMoney(it.cny, 'CNY') + ' · ' + it.calls + ' 次调用'
+    ))
+  }
+}
+function magpieStatusText(d) {
+  if (!d) return '读取中…'
+  if (d.pending) return '读取中…'
+  if (!d.enabled) return '统计已关闭'
+  if (d.source === 'file') {
+    return d.gateway && d.gateway.ok
+      ? '已连接网关 · 按 usage.jsonl 逐条统计'
+      : '仅本地明细文件（网关未连上）'
+  }
+  if (d.source === 'gateway') return '仅网关聚合（没读到 usage.jsonl）'
+  if (d.source === 'none') return '未连接 Magpie'
+  return String(d.reason || d.source || '未知状态')
+}
+function fillMagpieWindow(d) {
+  var card = magpieCardEl
+  if (!card) return
+  card.innerHTML = ''
+  var title = document.createElement('div')
+  title.className = 'dshwv-usage-wintitle'
+  title.textContent = 'Magpie 用量（本地网关）'
+  card.appendChild(title)
+  var closeBtn = document.createElement('button')
+  closeBtn.type = 'button'
+  closeBtn.className = 'dshwv-usage-close'
+  closeBtn.textContent = '×'
+  closeBtn.title = '关闭'
+  closeBtn.addEventListener('click', closeMagpieWindow)
+  card.appendChild(closeBtn)
+  var body = document.createElement('div')
+  body.className = 'dshwv-usage-windowbody'
+  card.appendChild(body)
+  // ① 状态
+  var st = document.createElement('div')
+  st.className = 'dshwv-usage-oview'
+  var stT = document.createElement('div')
+  stT.textContent = magpieStatusText(d)
+  stT.style.fontWeight = '700'
+  st.appendChild(stT)
+  if (d) {
+    var stS = document.createElement('div')
+    stS.className = 'dshwv-usage-hint'
+    stS.textContent = '网关 ' + String(d.baseUrl || '—')
+      + (d.file && d.file.path ? ' · 明细 ' + d.file.path : '')
+      + (d.at ? ' · 扫描于 ' + aboutFmtTime(d.at) : '')
+    st.appendChild(stS)
+  }
+  body.appendChild(st)
+  // ② 设置
+  var setBox = document.createElement('div')
+  setBox.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:4px 0 6px'
+  var onChk = document.createElement('input')
+  onChk.type = 'checkbox'
+  onChk.className = 'dshwv-check'
+  var curOn = magpieSettings ? magpieSettings.on !== false : !(d && d.enabled === false)
+  onChk.checked = curOn
+  onChk.title = '关闭后宿主不再读 Magpie 的用量（不联网、不读 usage.jsonl）'
+  var onLb = document.createElement('span')
+  onLb.textContent = '启用'
+  var urlInp = document.createElement('input')
+  urlInp.type = 'text'
+  urlInp.className = 'dshwv-colnat'
+  urlInp.style.flex = '1 1 150px'
+  urlInp.style.minWidth = '120px'
+  urlInp.value = String((magpieSettings && magpieSettings.url) || (d && d.baseUrl) || 'http://127.0.0.1:3425')
+  urlInp.title = 'Magpie 网关地址（默认本机 3425 端口）。改完点保存。'
+  if (magpieSettings && magpieSettings.urlLocked) {
+    urlInp.disabled = true
+    urlInp.title = '地址被环境变量 MAGPIE_BASE_URL 锁定，请改环境变量'
+  }
+  var saveBtn = document.createElement('button')
+  saveBtn.type = 'button'
+  saveBtn.className = 'dshwv-usage-more'
+  saveBtn.style.cssText = 'flex:0 0 auto;width:auto;margin:0;padding:4px 12px'
+  saveBtn.textContent = '保存'
+  var saveTip = document.createElement('span')
+  saveTip.className = 'dshwv-usage-hint'
+  saveTip.textContent = ''
+  saveBtn.addEventListener('click', function () {
+    saveTip.textContent = '保存中…'
+    magpieSaveSettings({ on: !!onChk.checked, url: String(urlInp.value || '') }, function (ok, err) {
+      saveTip.textContent = ok ? '已保存' : ('保存失败：' + err)
+    })
+  })
+  setBox.appendChild(onChk)
+  setBox.appendChild(onLb)
+  setBox.appendChild(urlInp)
+  setBox.appendChild(saveBtn)
+  setBox.appendChild(saveTip)
+  body.appendChild(setBox)
+  // ③ 四段统计
+  var periods = (d && d.periods) || null
+  if (!periods || !periods.today) {
+    var noData = document.createElement('div')
+    noData.className = 'dshwv-usage-hint'
+    noData.textContent = (d && (d.reason || d.error || d.fileError)) || '还没拿到 Magpie 的用量数据'
+    body.appendChild(noData)
+  } else {
+    magpiePeriodBlock(body, '今日', periods.today)
+    magpiePeriodBlock(body, '近 7 天', periods.week)
+    magpiePeriodBlock(body, '本月', periods.month)
+    magpiePeriodBlock(body, '累计', periods.all)
+    magpieRankRows(body, '今日按模型', periods.today.models, '今日还没有请求')
+    magpieRankRows(body, '今日按 agent', periods.today.agents, '今日还没有请求')
+    var recent = (d && d.recent) || []
+    if (recent.length) {
+      magpieSection(body, '近 14 天')
+      for (var i = recent.length - 1; i >= 0; i--) {
+        var r = recent[i]
+        if (!r || !r.calls) continue
+        body.appendChild(magpieRow(String(r.day),
+          magpieFmtTokens(r.tokens) + ' · ' + apiFmtMoney(r.cny, 'CNY') + ' · ' + r.calls + ' 次'))
+      }
+    }
+  }
+  // ④ 说明（口径必须写清，避免与「今日已用」混淆）
+  var note = document.createElement('div')
+  note.className = 'dshwv-usage-hint'
+  note.style.marginTop = '8px'
+  note.textContent = (d && d.note ? d.note + ' ' : '')
+    + '统计范围 = Magpie 记到的全部 agent 请求（含 DSH 自己），与「今日已用」的余额口径是两套数字，不能相加。'
+  body.appendChild(note)
+}
+function openMagpieWindow() {
+  try {
+    if (!magpieMaskEl) {
+      magpieMaskEl = document.createElement('div')
+      // 沿用 .dshwv-usage-mask 的外观（22000 段），另加一个专属类：
+      // 「更多消费记录」用的也是 .dshwv-usage-mask，光按那个类选会选中另一个窗口。
+      magpieMaskEl.className = 'dshwv-usage-mask dshwv-magpie-mask'
+      magpieMaskEl.style.display = 'none'
+      magpieCardEl = document.createElement('div')
+      magpieCardEl.className = 'dshwv-usage-card'
+      magpieMaskEl.appendChild(magpieCardEl)
+      magpieMaskEl.addEventListener('click', function (e) { if (e.target === magpieMaskEl) closeMagpieWindow() })
+      dshwBodyAppend(magpieMaskEl)
+    }
+    magpieMaskEl.style.display = 'flex'
+    fillMagpieWindow(magpieData) // 先渲染旧快照（有就立刻显示），随后刷新
+    magpieLoadSettings(function () {
+      magpieLoad(true, function (d) { try { fillMagpieWindow(d) } catch (err) {} })
+    })
+  } catch (err) {}
+}
+function closeMagpieWindow() {
+  try { if (magpieMaskEl) magpieMaskEl.style.display = 'none' } catch (err) {}
+}
+// 主菜单行：打开菜单时轻量刷新一次摘要（不强制重扫，走宿主 15s 快照）
+function refreshMagpieRow() {
+  try { magpieLoad(false, null) } catch (err) {}
+}
 // ===== v767：通用「入口行 + 可折叠体」组件（提示与音效设置面板 / 资源管理窗口共用）=====
 // 入口行常驻：可选 [✓] 开关 + 区名 + 当前值摘要 + ▸/▾；点整行才展开它下面的折叠体，可同时展开多个。
 // 折叠用 max-height 过渡（与「自定义提示」窗口里的 advBox 同一套路），展开动画结束后置 'none' —— 之后
@@ -12088,7 +12462,9 @@ function visibleTopZ() {
     function () { return dshwvHintEl }, function () { return apiModelMaskEl },
     function () { return accountingMask }, function () { return window.__dshwRemindMask },
     // v823（P2）：泡泡框编辑器（从 W1 里打开 ⇒ 靠 dshwLayerUp 抬到 20510）
-    function () { return frameEditMask }
+    function () { return frameEditMask },
+    // Magpie 用量窗口（22000 段：与记账/吸附窗口同层），必须登记，否则会低估当前最高层
+    function () { return magpieMaskEl }
   ]
   function eff(el) {
     try {
@@ -19876,6 +20252,8 @@ function toggleMenu() {
   try { resyncSizeCfg() } catch (err) {}
   menuOpen = !menuOpen
   if (menuOpen) positionMenu()
+  // Magpie 用量摘要：菜单打开时轻量刷新一次（宿主 15s 快照，不强制重扫）
+  if (menuOpen) { try { refreshMagpieRow() } catch (err) {} }
   menuBox.classList.toggle('dshwv-menu-open', menuOpen)
   if (menuOpen && !menuBtnHide) menuBtn.classList.add('dshwv-menu-btn-visible')
   // 汉堡按钮关闭菜单时同样复位用量子界面(用量态时滑回主菜单态,
