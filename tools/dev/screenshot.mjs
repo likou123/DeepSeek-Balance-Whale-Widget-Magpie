@@ -133,21 +133,39 @@ console.log('menu open:', await evaluate("(function(){var m=document.querySelect
 console.log('menu source row:', await evaluate("(function(){var b=document.querySelector('[data-dshw=\"src-magpie\"]');if(!b)return 'no btn';return b.parentNode.parentNode.textContent})()"))
 await shot('03-menu')
 
-// ③ 切到 Magpie 数据源
-const switched = await clickBySelector('[data-dshw="src-magpie"]')
-console.log('switch to magpie clicked:', switched)
-await sleep(2600)
-// 关键断言：按钮高亮必须跟着切（历史 bug：var 初始化把元素引用抹成 null ⇒ 高亮永远不动，
-// 用户看到的就是"按钮点不动"，虽然状态其实已经切了）
-const hl = await evaluate("(function(){var m=document.querySelector('[data-dshw=\"src-magpie\"]'),d=document.querySelector('[data-dshw=\"src-deepseek\"]');if(!m||!d)return 'no btns';return {magpieBg:m.style.background,deepBg:d.style.background,magpieColor:m.style.color,deepColor:d.style.color}})()")
-console.log('source buttons highlight:', JSON.stringify(hl))
-// 关菜单（点 ☰），再点鲸鱼看主显示
+// ③ 数据源多选：先勾 Magpie（两个都勾）→ 再取消 DS（只留 Magpie）→ 再勾回 DS
+const clickSrc = async (name) => {
+  const ok = await clickBySelector('[data-dshw="src-' + name + '"]')
+  await sleep(2600)
+  const st = await evaluate("(function(){var d=document.querySelector('[data-dshw=\"src-deepseek\"]'),m=document.querySelector('[data-dshw=\"src-magpie\"]');return {ds:!!(d&&d.checked),magpie:!!(m&&m.checked)}})()")
+  return { clicked: ok, state: st }
+}
+let r1 = await clickSrc('magpie')
+console.log('after checking magpie:', JSON.stringify(r1))
 await clickBySelector('.dshwv-menu-btn')
 await sleep(400)
 const wp2 = await whalePoint()
 if (wp2) await clickAt(wp2.x, wp2.y)
-console.log('bubble(magpie):', JSON.stringify(await bubbleText()))
-await shot('04-magpie-bubble')
+console.log('bubble(both):', JSON.stringify(await bubbleText()))
+await shot('04-both-bubble')
+
+// 只留 Magpie
+await clickBySelector('.dshwv-menu-btn')
+await sleep(600)
+let r2 = await clickSrc('deepseek')
+console.log('after unchecking deepseek:', JSON.stringify(r2))
+await clickBySelector('.dshwv-menu-btn')
+await sleep(400)
+const wp3 = await whalePoint()
+if (wp3) await clickAt(wp3.x, wp3.y)
+console.log('bubble(magpie only):', JSON.stringify(await bubbleText()))
+await shot('05-magpie-bubble')
+
+// 勾回 DS（恢复默认，别把测试状态留给下一轮）
+await clickBySelector('.dshwv-menu-btn')
+await sleep(600)
+let r3 = await clickSrc('deepseek')
+console.log('after re-checking deepseek:', JSON.stringify(r3))
 
 // ④ Magpie 统计窗口
 await clickBySelector('.dshwv-menu-btn')
@@ -155,7 +173,7 @@ await sleep(600)
 await clickBySelector('[data-dshw="magpie-open"]')
 await sleep(2600)
 console.log('magpie window text:', String(await evaluate("(function(){var m=document.querySelector('.dshwv-magpie-mask');return m?m.innerText:'no mask'})()")).slice(0, 1200))
-await shot('05-magpie-window')
+await shot('06-magpie-window')
 await evaluate("(function(){var b=document.querySelector('.dshwv-magpie-mask .dshwv-usage-close');if(b)b.click();return 'closed'})()")
 await sleep(300)
 
@@ -164,7 +182,7 @@ await evaluate("(function(){var v=document.querySelector('.dshwv-ver');if(!v)ret
 await sleep(2200)
 const aboutText = await evaluate("(function(){var a=document.querySelector('.dshwv-about');if(!a)return 'no about';return a.innerText})()")
 console.log('about magpie lines:', String(aboutText).split('\n').filter((l) => /Magpie/.test(l)).join(' | ') || '(未找到)')
-await shot('06-about')
+await shot('07-about')
 
 console.log('widget console errors:', events.filter((e) => e.method === 'Log.entryAdded' && e.params.entry.level === 'error').length)
 ws.close()

@@ -2232,22 +2232,36 @@ var srcLb = menuLabel('显示数据源')
 srcLb.style.flex = '0 0 auto'
 rowSrc.appendChild(srcLb)
 var srcWrap = document.createElement('div')
-srcWrap.style.cssText = 'flex:1;display:flex;gap:4px;justify-content:flex-end'
-function mkSrcBtn(text, value, title) {
-  var b = document.createElement('button')
-  b.type = 'button'
-  b.className = 'dshwv-usage-more'
-  b.style.cssText = 'flex:0 0 auto;width:auto;margin:0;padding:4px 8px;font-size:11px;white-space:nowrap'
-  b.textContent = text
-  b.title = title
-  b.setAttribute('data-dshw', 'src-' + value)
-  b.addEventListener('click', function (e) { e.stopPropagation(); setDisplaySource(value) })
-  return b
+srcWrap.style.cssText = 'flex:1;display:flex;gap:10px;justify-content:flex-end;align-items:center'
+// 多选（0.5.2，用户要求）：勾了就显示、不勾就完全不显示（含它自己的提醒泡泡）。
+// 注意这里**只**建 DOM；初值从 state 里读（state 在文件后面才初始化，所以拿不到时按默认值兜底，
+// 之后 sizeCfgApply → applyDisplaySources 会再同步一次）。
+function mkSrcChk(text, value, title, dflt) {
+  var wrap = document.createElement('label')
+  wrap.style.cssText = 'display:flex;align-items:center;gap:3px;cursor:pointer;font-size:11px'
+  var ck = document.createElement('input')
+  ck.type = 'checkbox'
+  ck.className = 'dshwv-check'
+  ck.style.cursor = 'pointer'
+  try { ck.checked = displaySources ? !!displaySources[value] : !!dflt } catch (err) { ck.checked = !!dflt }
+  ck.title = title
+  ck.setAttribute('data-dshw', 'src-' + value)
+  // 勾选状态由 state 决定（见 toggleDisplaySource）：这里读 ck.checked 只是"用户想要的"，
+  // 真被拒绝（比如最后一个不许取消）时 toggleDisplaySource 会把它改回去。
+  ck.addEventListener('change', function (e) { e.stopPropagation(); toggleDisplaySource(value, ck.checked) })
+  ck.addEventListener('click', function (e) { e.stopPropagation() })
+  var tx = document.createElement('span')
+  tx.textContent = text
+  wrap.appendChild(ck)
+  wrap.appendChild(tx)
+  return { wrap: wrap, ck: ck }
 }
-srcDeepBtn = mkSrcBtn('DS 余额', 'deepseek', '主显示用 DeepSeek 余额（提示行是余额观测出来的今日已用）')
-srcMagpieBtn = mkSrcBtn('Magpie', 'magpie', '主显示用 Magpie 网关（大数字 = 剩余额度，提示行 = 剩余% 与今日折算；统计范围含所有 agent）')
-srcWrap.appendChild(srcDeepBtn)
-srcWrap.appendChild(srcMagpieBtn)
+var srcDeepEls = mkSrcChk('DS 余额', 'deepseek', '勾上：主显示用 DeepSeek 余额（提示行是余额观测出来的今日已用）。不勾则不显示任何 DS 相关数字与提醒', true)
+var srcMagpieEls = mkSrcChk('Magpie', 'magpie', '勾上：主显示加 Magpie 网关（大数字优先给 DS，Magpie 进提示行；只勾这一项则大数字 = 剩余额度）。统计范围含所有 agent', false)
+srcDeepChk = srcDeepEls.ck
+srcMagpieChk = srcMagpieEls.ck
+srcWrap.appendChild(srcDeepEls.wrap)
+srcWrap.appendChild(srcMagpieEls.wrap)
 rowSrc.appendChild(srcWrap)
 menuBox.appendChild(rowSrc)
 try { syncDisplaySourceUI() } catch (err) {}
@@ -7275,6 +7289,9 @@ function usageAppendLine(body, m, below, amount) {
 function checkUsageAlerts(balance, todayUsage) {
   try {
     if (!usageSet) return
+    // 0.5.2（用户要求）：DS 这个数据源没勾就**不要再弹 DS 的提醒**。
+    // 之前每次启动都会冒「老大~你的DS余额已经不足¥5啦~」，对只用 Magpie 的用户是纯噪音。
+    if (!sourceOn('deepseek')) return
     var a = usageSet.alert
     if (a && a.on) {
       var below = Number(a.below)
@@ -17873,6 +17890,7 @@ function bubbleAmountText() {
 }
 function bubbleTodayText() {
   if (displaySource === 'magpie') return magpieMainHintText()
+  if (sourceOn('magpie')) { var mh = magpieInlineHintText(); if (mh) return mh }
   return (state.usageLabel || '今日已用') + ' ' + (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
 }
 // v782：赠金 / 充值余额两个数值模块的取数（与「总余额(充值金额+赠金)」同源：宿主余额返回体）。
@@ -17911,6 +17929,19 @@ function magpieMainHintText() {
   if (p && p.remaining !== null && p.remaining !== undefined) return '剩 ' + fmtPct1(p.remainingPct) + ' · 今日 ' + todayTxt
   if (today) return fmtTokShort(today.tokens) + ' tok · ' + today.calls + ' 次'
   return '没有用量数据'
+}
+// 两个数据源都勾上时，提示行给 Magpie 用的紧凑摘要（拿不到就返回空串，让调用方保留 DS 原文）
+function magpieInlineHintText() {
+  try {
+    var mv = magpieView
+    if (!mv || mv.pending || mv.enabled === false || !mv.ok) return ''
+    var p = (mv.quota || {}).primary || null
+    if (p && p.remaining !== null && p.remaining !== undefined) {
+      return 'Magpie ' + fmtTokShort(p.remaining) + ' · 剩 ' + fmtPct1(p.remainingPct)
+    }
+    if (mv.today) return 'Magpie 今日 ' + fmt(mv.today.cny, 'CNY')
+    return ''
+  } catch (err) { return '' }
 }
 function bubbleBonusText() {
   var v = state.bonusBalance
@@ -18747,6 +18778,12 @@ function bubbleRowContentOf(mod) {
       if (!tplTxt || tplTxt === '今日已用 {expense_ds}') return { txt: magpieMainHintText(), line: null }
       return { txt: bubbleContentText(mod, magpieMainHintText()), line: null }
     }
+    // 两个数据源都勾：提示行让给 Magpie（与 render() 同一条规则）
+    if (sourceOn('magpie') && !bubbleIsModelMod(mod)) {
+      var tplTxt2 = String(mod.tpl || '').trim()
+      var mh2 = magpieInlineHintText()
+      if (mh2 && (!tplTxt2 || tplTxt2 === '今日已用 {expense_ds}')) return { txt: mh2, line: null }
+    }
     var tv2 = bubbleIsModelMod(mod) ? apiModelTodayText(mod.modelId) : (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
     return { txt: bubbleContentText(mod, '今日已用 ' + tv2), line: null }
   }
@@ -19566,6 +19603,11 @@ function render() {
   } else {
     amount = shown !== null ? fmt(shown, state.currency) : fmt(state.balance, state.currency)
     hint = (state.usageLabel || '今日已用') + ' ' + (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
+    // 两个数据源都勾上时：大数字给 DS 余额，提示行让给 Magpie（一行里塞不下两套"今日已用"）
+    if (sourceOn('magpie')) {
+      var mh = magpieInlineHintText()
+      if (mh) hint = mh
+    }
   }
   amountEl.textContent = amount
   if (bubbleRandomActive && bubbleRandomLines) {
@@ -19601,46 +19643,75 @@ function renderMagpieMain() {
     setHint(magpieMainHintText())
   } catch (err) {}
 }
-// 切换数据源。silent = 从配置回填（不回写、不弹窗）。
-function setDisplaySource(v, opts) {
-  var next = v === 'magpie' ? 'magpie' : 'deepseek'
-  var changed = next !== displaySource
-  displaySource = next
+// 0.5.2（用户要求）：数据源改成**多选**。勾了就显示、不勾就完全不显示（包括它自己的提醒泡泡）。
+//   · displaySources 是勾选状态；displaySource 是**派生**出来的"主显示"（顺序固定 DS → Magpie，
+//     所以两个都勾时大数字仍是 DS 余额，Magpie 的信息进提示行）；
+//   · 至少保留一个：全关掉等于界面上什么都不显示，属于误操作，会被挡回去。
+var DISPLAY_SOURCE_KEYS = ['deepseek', 'magpie']
+var displaySources = { deepseek: true, magpie: false }
+var displaySource = 'deepseek'
+function sourceOn(name) { return !!displaySources[name] }
+function primaryDisplaySourceOf(set) {
+  var s = set || displaySources
+  if (s.deepseek) return 'deepseek'
+  if (s.magpie) return 'magpie'
+  return 'deepseek'
+}
+function displaySourcesArray() {
+  var out = []
+  for (var i = 0; i < DISPLAY_SOURCE_KEYS.length; i++) if (displaySources[DISPLAY_SOURCE_KEYS[i]]) out.push(DISPLAY_SOURCE_KEYS[i])
+  return out
+}
+function applyDisplaySources(list, opts) {
+  var raw = Array.isArray(list) ? list : []
+  var next = { deepseek: false, magpie: false }
+  for (var i = 0; i < raw.length; i++) if (raw[i] === 'deepseek' || raw[i] === 'magpie') next[raw[i]] = true
+  // 全关 = 误操作：保底留 DS（与宿主 normalizeDisplaySources 同一条规则）
+  if (!next.deepseek && !next.magpie) next.deepseek = true
+  var changed = next.deepseek !== displaySources.deepseek || next.magpie !== displaySources.magpie
+  displaySources = next
+  displaySource = primaryDisplaySourceOf(next)
   try { syncDisplaySourceUI() } catch (err) {}
-  if (!changed) return
+  if (!changed) return false
   try { render() } catch (err) {}
-  if (opts && opts.silent) return
-  // 立刻给一次可见反馈：切换只改"显示哪一套数字"，界面别的地方不会变，
-  // 没有提示的话用户很容易以为按钮没生效（本批就被这么反馈过）。
-  try {
-    dshwvToast(next === 'magpie' ? '主显示已切到 Magpie（剩余额度 + 今日折算）' : '主显示已切回 DeepSeek 余额', 'ok', 1600)
-  } catch (err) {}
-  try { saveConfig() } catch (err) {}
-  // 切到 Magpie：立刻要一次最新数据（不等下个 60 秒周期）
-  if (next === 'magpie') {
-    try { refresh(true) } catch (err) {}
-    // 没连上就别让用户对着一个「--」发呆：直接把 Magpie 窗口打开，地址/开关都在里面
+  if (!(opts && opts.silent)) {
     try {
-      if (!magpieView || magpieView.ok === false || magpieView.pending) {
-        setTimeout(function () { try { if (magpieView && magpieView.ok === false) openMagpieWindow() } catch (err) {} }, 2500)
-      }
+      var names = []
+      if (next.deepseek) names.push('DS 余额')
+      if (next.magpie) names.push('Magpie')
+      dshwvToast('主显示数据源：' + names.join(' + '), 'ok', 1500)
     } catch (err) {}
+    try { saveConfig() } catch (err) {}
+    if (next.magpie) {
+      try { refresh(true) } catch (err) {}
+      try {
+        if (!magpieView || magpieView.ok === false || magpieView.pending) {
+          setTimeout(function () { try { if (magpieView && magpieView.ok === false) openMagpieWindow() } catch (err) {} }, 2500)
+        }
+      } catch (err) {}
+    }
   }
+  return true
+}
+// 勾/取消某一个（界面上点复选框走这里）
+function toggleDisplaySource(name, on) {
+  if (name !== 'deepseek' && name !== 'magpie') return
+  var next = { deepseek: !!displaySources.deepseek, magpie: !!displaySources.magpie }
+  next[name] = !!on
+  if (!next.deepseek && !next.magpie) {
+    try { dshwvToast('至少要保留一个数据源（不然挂件上什么都不显示）', 'err', 2200) } catch (err) {}
+    try { syncDisplaySourceUI() } catch (err) {}
+    return
+  }
+  applyDisplaySources(next.deepseek ? (next.magpie ? ['deepseek', 'magpie'] : ['deepseek']) : ['magpie'])
 }
 function syncDisplaySourceUI() {
   try {
-    // 双保险：引用被意外清掉（历史上被 `var x = null` 抹过一次）时按 data-dshw 重新找，
-    // 保证"高亮不跟着状态走"这种事不会再静默发生。
-    var d = srcDeepBtn || document.querySelector('[data-dshw="src-deepseek"]')
-    var m = srcMagpieBtn || document.querySelector('[data-dshw="src-magpie"]')
-    if (!d || !m) return
-    if (!srcDeepBtn) srcDeepBtn = d
-    if (!srcMagpieBtn) srcMagpieBtn = m
-    var on = displaySource === 'magpie'
-    d.style.background = on ? 'transparent' : '#203170'
-    d.style.color = on ? '#203170' : '#fff'
-    m.style.background = on ? '#203170' : 'transparent'
-    m.style.color = on ? '#fff' : '#203170'
+    // 双保险：引用被意外清掉时按 data-dshw 重新找，保证"勾选状态不跟着走"不会静默发生。
+    var d = srcDeepChk || document.querySelector('[data-dshw="src-deepseek"]')
+    var m = srcMagpieChk || document.querySelector('[data-dshw="src-magpie"]')
+    if (d) { if (!srcDeepChk) srcDeepChk = d; d.checked = !!displaySources.deepseek }
+    if (m) { if (!srcMagpieChk) srcMagpieChk = m; m.checked = !!displaySources.magpie }
   } catch (err) {}
 }
 function express() {
@@ -19824,19 +19895,27 @@ function refresh(manual) {
         checkUsageAlerts(nb, state.todayUsage)
         if (changed && !currencyChanged) {
           if (!manual) {
-            showBubble()
-            state.status = 'changing'
-            // balance-change bubble: wait 0.3s after it floats out, then roll the number
-            if (animDelayTimer) clearTimeout(animDelayTimer)
-            animDelayTimer = setTimeout(function () {
-              animDelayTimer = null
-              animateAmount(shown, nb, nc, ANIM_MS)
-            }, 300)
-            if (settleTimer) clearTimeout(settleTimer)
-            settleTimer = setTimeout(function () {
-              settleTimer = null
-              if (state.status === 'changing') { state.status = 'ok'; render() }
-            }, CHANGE_MS + 300)
+            // 0.5.2：DS 数据源没勾 ⇒ 余额变化不再自动弹泡（只更新数字）。
+            // 只用 Magpie 的用户不该被"DS 余额变了"打扰；气泡本身仍可手动点开。
+            if (!sourceOn('deepseek')) {
+              if (animId === null) shown = nb
+              state.status = 'ok'
+              render()
+            } else {
+              showBubble()
+              state.status = 'changing'
+              // balance-change bubble: wait 0.3s after it floats out, then roll the number
+              if (animDelayTimer) clearTimeout(animDelayTimer)
+              animDelayTimer = setTimeout(function () {
+                animDelayTimer = null
+                animateAmount(shown, nb, nc, ANIM_MS)
+              }, 300)
+              if (settleTimer) clearTimeout(settleTimer)
+              settleTimer = setTimeout(function () {
+                settleTimer = null
+                if (state.status === 'changing') { state.status = 'ok'; render() }
+              }, CHANGE_MS + 300)
+            }
           } else {
             animateAmount(shown, nb, nc, ANIM_MS)
             state.status = 'ok'
@@ -19883,19 +19962,18 @@ var costBubbleActive = false
 var scrollGapOn = false
 var scrollGapPx = 17
 var menuBtnHide = false // 主菜单开关:隐藏挂件菜单按钮,改为右键小鲸鱼唤出菜单
-// 0.5.x（用户要求）：主显示（大数字/标签/提示行）的数据源 —— 'deepseek'（余额口径，默认）
-// 或 'magpie'（网关口径）。只决定"渲染哪一套数字"：两套数据都在更新，切换不动账本、
-// 不改统计、也绝不把两个数字相加。落 .dshw-size.json 的 displaySource。
-var displaySource = 'deepseek'
+// 主显示数据源的 state（displaySources / displaySource）定义在上面「主显示数据源」那一块
+// （约 L19620）。这里**不要**再写一遍 `var displaySource = 'deepseek'` —— 那会在文件执行到
+// 这一行时把它重置回默认值，用户勾好的 Magpie 会被抹掉（与本文档里记过的
+// 「var x = null 抹掉早先的引用」是同一类"初始化语句在运行期覆盖"的坑）。
 // 主显示用的 Magpie 视图（宿主随 /dsh-whale/balance.json 一起下发，见 magpieDisplayPayload）
 var magpieView = null
 // 菜单里「显示数据源」那两个按钮（建的时候写进来，syncDisplaySourceUI 只改它们的样式）
-// ⚠️ 这两个**不在这里赋 null**：主菜单那一行在文件更早的位置（约 L2247）就建好按钮并写进这两个变量了，
-//   `var x = null` 是运行到这里才执行的语句，再来一次会把早先写进去的元素抹掉 ——
-//   syncDisplaySourceUI() 随即在第 1 行就 early-return，表现是"点了 Magpie 按钮一点反应都没有"
-//   （高亮不换、看起来像点不动；实际状态已经切了）。和 magpieRowTextEl 是同一个坑，本批踩了两次。
-var srcDeepBtn
-var srcMagpieBtn
+// ⚠️ 这两个**不在这里赋 null / 也不重新赋值**：主菜单那一行在文件更早的位置（约 L2247）就建好
+//   复选框并写进这两个变量了；`var x = null` 是运行到这里才执行的语句，会把早先写进去的元素抹掉
+//   （本批真的踩过两次：magpieRowTextEl 与这两个按钮）。这里只留声明。
+var srcDeepChk
+var srcMagpieChk
 // issue #116：Codex 本机统计开关。关掉后宿主完全不扫 ~/.codex/sessions（适合会话日志很大的机器）。
 // v748：默认值仍是「开」，但**宿主会先看有没有 Codex 模型** —— 没配就一律按关闭处理，
 // 所以这里保持默认 true 是安全的（不会让没配 Codex 的用户被扫盘），也不会因为一次普通保存
@@ -19956,7 +20034,7 @@ function configPayload() {
   //   宿主白名单、读侧合并、客户端回填都做了，唯独这里没发 ⇒ 宿主 pickB 走"沿用旧值(true)" ⇒ 永远存不住。
   //   与 v863 的 subagent.mute 是同一类"半截活"：新键必须走完 **四件套**
   //   ① 客户端 PUT 载荷 → ② 宿主写侧白名单 → ③ 宿主读侧合并 → ④ 客户端回填。
-  return JSON.stringify({ scale: state.scale, sound: soundOn, pressOn: pressOn !== false, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx, menuBtnHide: menuBtnHide, codexStatsOn: codexStatsOn, displaySource: displaySource })
+  return JSON.stringify({ scale: state.scale, sound: soundOn, pressOn: pressOn !== false, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx, menuBtnHide: menuBtnHide, codexStatsOn: codexStatsOn, displaySources: displaySourcesArray() })
 }
 // 真正的 PUT：读响应 → 失败（网络异常 / HTTP!=200 / {ok:false}）静默重试一次 → 仍失败才提示
 function configPut(payload, retried) {
@@ -22737,9 +22815,12 @@ function sizeCfgApply(d) {
       codexStatsOn = d.codexStatsOn
       if (codexStatsToggle) codexStatsToggle.checked = codexStatsOn
     }
-    // 0.5.x（数据源切换）：主显示用哪一套口径。缺字段 → 保持现值（绝不落默认，与既有约定一致）。
-    if (d && (d.displaySource === 'magpie' || d.displaySource === 'deepseek')) {
-      setDisplaySource(d.displaySource, { silent: true })
+    // 0.5.x（数据源多选）：主显示用哪几套口径。缺字段 → 保持现值（绝不落默认，与既有约定一致）。
+    if (d && Array.isArray(d.displaySources)) {
+      try { applyDisplaySources(d.displaySources, { silent: true }) } catch (err) {}
+    } else if (d && (d.displaySource === 'magpie' || d.displaySource === 'deepseek')) {
+      // 老配置（0.5.0/0.5.1 只存字符串）
+      try { applyDisplaySources([d.displaySource], { silent: true }) } catch (err) {}
     }
     // 无论服务端带没带这个键都要应用一次：触屏上 ☰ 需要常显（issue #91 缺陷2），
     // 而旧写法只在键存在时才调用，空配置下按钮永远是透明的。
