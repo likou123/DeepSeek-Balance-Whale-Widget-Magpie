@@ -48,6 +48,29 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://127.0.0.1')
   const route = findRoute(url.pathname)
   if (route) {
+    // 假 DeepSeek 余额（只为本地看界面）：真实 handler 拿不到 DSH 凭据服务，余额一定 401，
+    // 那样"主显示 = DS 余额"这条路径在本地永远是红的。设 DSHW_MOCK_BALANCE=1 时保留真响应的
+    // 其它字段（尤其 magpie），只把余额/今日已用换成假数据 —— 产品代码一行都不改。
+    if (url.pathname === '/dsh-whale/balance.json' && process.env.DSHW_MOCK_BALANCE === '1') {
+      const captured = []
+      const fakeRes = {
+        writeHead() {},
+        end(body) { if (body) captured.push(String(body)) },
+      }
+      try { await route.handler(req, fakeRes) } catch (err) {}
+      let base = {}
+      try { base = JSON.parse(captured[0] || '{}') } catch (err) { base = {} }
+      const merged = Object.assign({}, base, {
+        ok: true, totalBalance: 42.18, currency: 'CNY',
+        todayUsage: 1.23, todayUsageCurrency: 'CNY',
+        usageLabel: '已观测消费', usageSource: 'balance-observed', isPeak: false,
+        magpie: base.magpie || null,
+      })
+      delete merged.error
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end(JSON.stringify(merged))
+      return
+    }
     try { await route.handler(req, res) } catch (err) {
       if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }) }
       try { res.end('harness error: ' + String((err && err.message) || err)) } catch (e2) {}

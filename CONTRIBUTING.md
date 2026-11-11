@@ -34,16 +34,16 @@
 dsh-whale-widget/
 ├── package.json                     38 行   DSH bundle 插件元数据（dsh.bundle.patch → cordis.patch.yml）
 ├── cordis.patch.yml                 15 行   插件挂载声明
-├── README.md                       532 行   安装 / 使用 / 定价 / 完整目录结构（动代码前先读它）
+├── README.md                       538 行   安装 / 使用 / 定价 / 完整目录结构（动代码前先读它）
 ├── PROVENANCE.md                    37 行   素材来源与许可范围（动 assets/ 前必读）
 ├── whale-widget-prompt.md          202 行   完整规格、视觉参数、路由清单、维护提示词（二次开发入口）
 │
 ├── lib/
-│   ├── index.js                  5,390 行   宿主侧本体：28 条路由 + 记账接线 + Magpie 用量 + 音效/图片/角色服务
+│   ├── index.js                  5,544 行   宿主侧本体：28 条路由 + 记账接线 + Magpie 用量/额度 + 音效/图片/角色服务
 │   └── accounting.mjs              289 行   记账内核：定点金额运算 + 余额观测/校正账本
 │
 ├── assets/
-│   ├── whale-widget.js          22,679 行   前端挂件本体（**宿主按 mtime 热读这个单文件**）
+│   ├── whale-widget.js          22,885 行   前端挂件本体（**宿主按 mtime 热读这个单文件**）
 │   ├── DSH2.png / DSniang1.png / DSniang02.png   角色图与 README 展示图
 │   ├── rua.gif / bubble-petpet.gif / bubble-money1.gif
 │   ├── Ya1.mp3 / Ya2.mp3 / D1.mp3 / D2.mp3  预置音效

@@ -2224,6 +2224,33 @@ resOpenBtn.addEventListener('click', function (e) { e.stopPropagation(); openRes
 rowRes.appendChild(menuLabel('资源管理'))
 rowRes.appendChild(resOpenBtn)
 menuBox.appendChild(rowRes)
+// —— 显示数据源（0.5.x，用户要求）：主显示用「DS 余额」还是「Magpie 网关」——
+// 放主菜单最显眼的位置（就在 Magpie 用量行上面）：它决定**挂件身上那个大数字是谁**，
+// 比"去二级菜单里看 Magpie"重要得多。
+var rowSrc = menuRow()
+var srcLb = menuLabel('显示数据源')
+srcLb.style.flex = '0 0 auto'
+rowSrc.appendChild(srcLb)
+var srcWrap = document.createElement('div')
+srcWrap.style.cssText = 'flex:1;display:flex;gap:4px;justify-content:flex-end'
+function mkSrcBtn(text, value, title) {
+  var b = document.createElement('button')
+  b.type = 'button'
+  b.className = 'dshwv-usage-more'
+  b.style.cssText = 'flex:0 0 auto;width:auto;margin:0;padding:4px 8px;font-size:11px;white-space:nowrap'
+  b.textContent = text
+  b.title = title
+  b.setAttribute('data-dshw', 'src-' + value)
+  b.addEventListener('click', function (e) { e.stopPropagation(); setDisplaySource(value) })
+  return b
+}
+srcDeepBtn = mkSrcBtn('DS 余额', 'deepseek', '主显示用 DeepSeek 余额（提示行是余额观测出来的今日已用）')
+srcMagpieBtn = mkSrcBtn('Magpie', 'magpie', '主显示用 Magpie 网关（大数字 = 剩余额度，提示行 = 剩余% 与今日折算；统计范围含所有 agent）')
+srcWrap.appendChild(srcDeepBtn)
+srcWrap.appendChild(srcMagpieBtn)
+rowSrc.appendChild(srcWrap)
+menuBox.appendChild(rowSrc)
+try { syncDisplaySourceUI() } catch (err) {}
 // —— Magpie 用量（Magpie 适配）：一行摘要 + 「查看」打开统计窗口 ——
 // 放主菜单而不是「用量记录」子界面里：它是**另一套口径**（Magpie 记到的全部 agent 请求），
 // 与「今日已用」的余额观测互不相干，混在一个页面里最容易让人以为两者应该相加。
@@ -6552,7 +6579,42 @@ function fillMagpieWindow(d) {
   setBox.appendChild(saveBtn)
   setBox.appendChild(saveTip)
   body.appendChild(setBox)
-  // ③ 四段统计
+  // ③ 额度（剩余量）：来自 Magpie 的 /v1/magpie/quotas，一个账号一张卡，卡里若干窗口
+  //   （令牌总量 / 5h / 周…）。大数字是"剩余"，与 Magpie 自己额度页的口径一致。
+  var qv = (d && d.quotas) || null
+  if (qv && qv.ok && Array.isArray(qv.items) && qv.items.length) {
+    magpieSection(body, '额度（剩余量）')
+    for (var qi = 0; qi < qv.items.length; qi++) {
+      var qit = qv.items[qi]
+      var who = qit.user ? (' · ' + qit.user) : ''
+      var wins = qit.windows || []
+      for (var wi = 0; wi < wins.length; wi++) {
+        var w = wins[wi]
+        body.appendChild(magpieRow(
+          String(qit.name || '未知') + who + (w.name && w.name !== '令牌用量' ? ' · ' + w.name : ''),
+          String(w.display || '—') + (w.remainingPct !== null && w.remainingPct !== undefined ? ' · 剩 ' + fmtPct1(w.remainingPct) : ''),
+          String(qit.name || '') + who + (w.plan || qit.plan ? ' · ' + (qit.plan || '') : '') + ' · ' + String(w.display || '')
+        ))
+      }
+    }
+    var totList = Array.isArray(qv.totals) ? qv.totals : []
+    for (var ti = 0; ti < totList.length; ti++) {
+      var t = totList[ti]
+      if (t.remaining === null || t.remaining === undefined) continue
+      var totRow = magpieRow(
+        '合计 · ' + String(t.name || '额度') + (t.accounts > 1 ? '（' + t.accounts + ' 个账号）' : ''),
+        fmtTokShort(t.remaining) + ' 可用 / ' + fmtTokShort(t.limit) + (t.remainingPct !== null ? ' · 剩 ' + fmtPct1(t.remainingPct) : '')
+      )
+      totRow.style.fontWeight = '700'
+      body.appendChild(totRow)
+    }
+  } else if (qv && !qv.ok) {
+    var qerr = document.createElement('div')
+    qerr.className = 'dshwv-usage-hint'
+    qerr.textContent = '额度读不到：' + (qv.error || '网关没有返回额度（可能是按量付费的 key，没有"剩余量"这个概念）')
+    body.appendChild(qerr)
+  }
+  // ④ 四段统计
   var periods = (d && d.periods) || null
   if (!periods || !periods.today) {
     var noData = document.createElement('div')
@@ -17803,16 +17865,53 @@ function bubbleModuleFontU(level) {
   return Math.round(40 + (n - 1) * 200 / 49)
 }
 function bubbleAmountText() {
+  // 数据源 = Magpie：大数字换成网关口径（剩余额度；没有额度就退回今日折算）
+  if (displaySource === 'magpie') return magpieMainAmountText()
   var v = shown !== null ? shown : (state.balance !== null ? state.balance : null)
   if (v === null) return '…'
   return fmt(v, state.currency)
 }
 function bubbleTodayText() {
+  if (displaySource === 'magpie') return magpieMainHintText()
   return (state.usageLabel || '今日已用') + ' ' + (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
 }
 // v782：赠金 / 充值余额两个数值模块的取数（与「总余额(充值金额+赠金)」同源：宿主余额返回体）。
 //   ⚠️ 两个数字**可能拿不到**（厂商没有该字段、或未登录账号）⇒ 显示 `—`，**不显示 0**
 //   —— 0 的意思是"确实没有了"，与"读不到"是两件事（记账也依赖这个区分）。
+// Magpie 口径的主显示取值（与 renderMagpieMain 同一套口径，供模块渲染复用）：
+//   大数字 = 剩余额度（多账号合计、取"最紧"的那条窗口）；没有额度窗口 → 今日折算金额。
+function magpieMainAmountText() {
+  var mv = magpieView
+  var q = (mv && mv.quota) || {}
+  var p = q.primary || null
+  if (p && p.remaining !== null && p.remaining !== undefined) return fmtTokShort(p.remaining)
+  var today = mv && mv.today
+  if (today) return fmt(today.cny, 'CNY')
+  if (mv && mv.pending) return '…'
+  return '--'
+}
+function magpieMainLabelText() {
+  var mv = magpieView
+  var q = (mv && mv.quota) || {}
+  var p = q.primary || null
+  // 标签要短：气泡宽度固定，'Magpie 剩余 token' 会折成两行（实测），单位交给提示行/面板说明
+  if (p && p.remaining !== null && p.remaining !== undefined) return 'Magpie 剩余'
+  return 'Magpie 今日已用'
+}
+function magpieMainHintText() {
+  var mv = magpieView
+  if (!mv) return '加载中…'
+  if (mv.pending) return '加载中…'
+  if (mv.enabled === false) return 'Magpie 统计已关闭'
+  if (!mv.ok) return String(mv.reason || '未连接 Magpie').slice(0, 22)
+  var q = mv.quota || {}
+  var p = q.primary || null
+  var today = mv.today || null
+  var todayTxt = today ? fmt(today.cny, 'CNY') : '--'
+  if (p && p.remaining !== null && p.remaining !== undefined) return '剩 ' + fmtPct1(p.remainingPct) + ' · 今日 ' + todayTxt
+  if (today) return fmtTokShort(today.tokens) + ' tok · ' + today.calls + ' 次'
+  return '没有用量数据'
+}
 function bubbleBonusText() {
   var v = state.bonusBalance
   if (v === null || v === undefined || !isFinite(Number(v))) return '—'
@@ -18199,8 +18298,10 @@ function bubbleContentTokenMap(m) {
     // v782：充值余额模块（{recharge_ds}）。
     map['recharge_ds'] = bubbleRechargeText()
   } else if (m.type === 'today') {
-    v = (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
-    map['expense_ds'] = v
+    var tvSrc = displaySource === 'magpie'
+      ? (magpieView && magpieView.today ? fmt(magpieView.today.cny, 'CNY') : '--')
+      : (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
+    map['expense_ds'] = tvSrc
   } else if (m.type === 'session') {
     // v768：对话名模块 —— {session} = 当前对话标题（按模块的「保留长度」截断）
     map['session'] = bubbleSessionText(m)
@@ -18639,6 +18740,13 @@ function bubbleRowContentOf(mod) {
   if (mod.type === 'bonus') return { txt: bubbleContentText(mod, bubbleBonusText()), line: null }
   if (mod.type === 'recharge') return { txt: bubbleContentText(mod, bubbleRechargeText()), line: null }
   if (mod.type === 'today') {
+    // 数据源 = Magpie：自动内容换成「剩 x% · 今日 ¥y」，不再说"今日已用 <DS 金额>"。
+    // 只替换**内建默认模板**（'今日已用 {expense_ds}' 或没填）——用户自己写的模板照旧按占位符渲染。
+    if (displaySource === 'magpie' && !bubbleIsModelMod(mod)) {
+      var tplTxt = String(mod.tpl || '').trim()
+      if (!tplTxt || tplTxt === '今日已用 {expense_ds}') return { txt: magpieMainHintText(), line: null }
+      return { txt: bubbleContentText(mod, magpieMainHintText()), line: null }
+    }
     var tv2 = bubbleIsModelMod(mod) ? apiModelTodayText(mod.modelId) : (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
     return { txt: bubbleContentText(mod, '今日已用 ' + tv2), line: null }
   }
@@ -18668,7 +18776,11 @@ function bubbleRowContentOf(mod) {
     }
     return { txt: '', line: null }
   }
-  return { txt: mod.text || '', line: null }
+  var tailTxt = mod.text || ''
+  // 数据源 = Magpie 时，把**内建默认标签**「DeepSeek 余额」换成 Magpie 的说法
+  // （只替换这一个内建文案：用户自己改过的文字一个字都不动 —— 否则等于悄悄改用户配置）。
+  if (displaySource === 'magpie' && String(tailTxt).trim() === 'DeepSeek 余额') tailTxt = magpieMainLabelText()
+  return { txt: tailTxt, line: null }
 }
 // 渲染一组模块为泡泡内容(F2 渲染层:按行分组 → 行内 flex 并排(≤6 模块/行)→ 超宽自动折行;
 // 图片单独一整行;泡泡行数上限维持 6)
@@ -19440,6 +19552,10 @@ function animateAmount(from, to, currency, duration) {
 function render() {
   // 消耗金额泡泡显示期间，余额渲染不覆盖其内容（金额行/标题行/提示行）
   if (costBubbleActive) return
+  // 0.5.x（用户要求）：主显示可以切到 Magpie 口径 —— 走单独一条渲染路径，
+  // 不去改原来那条余额逻辑（那条牵着记账、峰谷、动画、预警，动它风险远大于收益）。
+  if (displaySource === 'magpie') { renderMagpieMain(); return }
+  if (labelEl.textContent !== 'DeepSeek 余额') labelEl.textContent = 'DeepSeek 余额'
   var amount, hint
   if (state.status === 'error') {
     amount = shown !== null ? fmt(shown, state.currency) : '--'
@@ -19459,6 +19575,62 @@ function render() {
   }
   // 注意:不在泡泡显示期间整泡重绘(内容在用户观看时保持稳定);
   // 数值/峰谷等更新由“泡泡消失→下一次显示”时的渲染自然采用最新 state
+}
+// ===== 主显示数据源（0.5.x，用户要求）=====
+// 为什么要有它：挂件原来的大数字/提示行只可能是「DeepSeek 余额 + 今日已用」；
+// 而 Magpie 用户真正想盯的往往是网关那边的「剩余额度 + 今日折算」。这两套口径各自独立，
+// 所以这里只做**显示层的切换**：不动账本、不动任何统计、也不把两个数字相加。
+function fmtTokShort(n) {
+  var v = Number(n)
+  if (!isFinite(v)) return '--'
+  if (v >= 100000000) return (v / 100000000).toFixed(2).replace(/\.?0+$/, '') + '亿'
+  if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '万'
+  return String(Math.round(v))
+}
+function fmtPct1(x) {
+  var v = Number(x)
+  if (!isFinite(v)) return '--'
+  return (v >= 10 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, '') + '%'
+}
+// Magpie 口径的主渲染：大数字 = 剩余额度（多账号合计后"最紧"的那条额度）；
+// 提示行 = 「剩 x% · 今日 ¥y」。没有额度窗口（纯按量付费的 key）时退回「今日已用 ¥y」。
+function renderMagpieMain() {
+  try {
+    labelEl.textContent = magpieMainLabelText()
+    amountEl.textContent = magpieMainAmountText()
+    setHint(magpieMainHintText())
+  } catch (err) {}
+}
+// 切换数据源。silent = 从配置回填（不回写、不弹窗）。
+function setDisplaySource(v, opts) {
+  var next = v === 'magpie' ? 'magpie' : 'deepseek'
+  var changed = next !== displaySource
+  displaySource = next
+  try { syncDisplaySourceUI() } catch (err) {}
+  if (!changed) return
+  try { render() } catch (err) {}
+  if (opts && opts.silent) return
+  try { saveConfig() } catch (err) {}
+  // 切到 Magpie：立刻要一次最新数据（不等下个 60 秒周期）
+  if (next === 'magpie') {
+    try { refresh(true) } catch (err) {}
+    // 没连上就别让用户对着一个「--」发呆：直接把 Magpie 窗口打开，地址/开关都在里面
+    try {
+      if (!magpieView || magpieView.ok === false || magpieView.pending) {
+        setTimeout(function () { try { if (magpieView && magpieView.ok === false) openMagpieWindow() } catch (err) {} }, 2500)
+      }
+    } catch (err) {}
+  }
+}
+function syncDisplaySourceUI() {
+  try {
+    if (!srcDeepBtn || !srcMagpieBtn) return
+    var on = displaySource === 'magpie'
+    srcDeepBtn.style.background = on ? 'transparent' : '#203170'
+    srcDeepBtn.style.color = on ? '#203170' : '#fff'
+    srcMagpieBtn.style.background = on ? '#203170' : 'transparent'
+    srcMagpieBtn.style.color = on ? '#fff' : '#203170'
+  } catch (err) {}
 }
 function express() {
   root.style.right = 'auto'
@@ -19614,6 +19786,8 @@ function refresh(manual) {
   fetch(BALANCE_URL + (manual ? '?refresh=1' : ''), { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
     .then(function (r) { return r.json() })
     .then(function (data) {
+      // 数据源切换：Magpie 的紧凑快照跟余额一起下发（成功失败都带），先落到本地再渲染
+      try { if (data && data.magpie) magpieView = data.magpie } catch (err) {}
       if (data && data.ok) {
         var nb = Number(data.totalBalance)
         var nc = String(data.currency || 'CNY')
@@ -19698,6 +19872,15 @@ var costBubbleActive = false
 var scrollGapOn = false
 var scrollGapPx = 17
 var menuBtnHide = false // 主菜单开关:隐藏挂件菜单按钮,改为右键小鲸鱼唤出菜单
+// 0.5.x（用户要求）：主显示（大数字/标签/提示行）的数据源 —— 'deepseek'（余额口径，默认）
+// 或 'magpie'（网关口径）。只决定"渲染哪一套数字"：两套数据都在更新，切换不动账本、
+// 不改统计、也绝不把两个数字相加。落 .dshw-size.json 的 displaySource。
+var displaySource = 'deepseek'
+// 主显示用的 Magpie 视图（宿主随 /dsh-whale/balance.json 一起下发，见 magpieDisplayPayload）
+var magpieView = null
+// 菜单里「显示数据源」那两个按钮（建的时候写进来，syncDisplaySourceUI 只改它们的样式）
+var srcDeepBtn = null
+var srcMagpieBtn = null
 // issue #116：Codex 本机统计开关。关掉后宿主完全不扫 ~/.codex/sessions（适合会话日志很大的机器）。
 // v748：默认值仍是「开」，但**宿主会先看有没有 Codex 模型** —— 没配就一律按关闭处理，
 // 所以这里保持默认 true 是安全的（不会让没配 Codex 的用户被扫盘），也不会因为一次普通保存
@@ -19758,7 +19941,7 @@ function configPayload() {
   //   宿主白名单、读侧合并、客户端回填都做了，唯独这里没发 ⇒ 宿主 pickB 走"沿用旧值(true)" ⇒ 永远存不住。
   //   与 v863 的 subagent.mute 是同一类"半截活"：新键必须走完 **四件套**
   //   ① 客户端 PUT 载荷 → ② 宿主写侧白名单 → ③ 宿主读侧合并 → ④ 客户端回填。
-  return JSON.stringify({ scale: state.scale, sound: soundOn, pressOn: pressOn !== false, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx, menuBtnHide: menuBtnHide, codexStatsOn: codexStatsOn })
+  return JSON.stringify({ scale: state.scale, sound: soundOn, pressOn: pressOn !== false, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx, menuBtnHide: menuBtnHide, codexStatsOn: codexStatsOn, displaySource: displaySource })
 }
 // 真正的 PUT：读响应 → 失败（网络异常 / HTTP!=200 / {ok:false}）静默重试一次 → 仍失败才提示
 function configPut(payload, retried) {
@@ -22538,6 +22721,10 @@ function sizeCfgApply(d) {
     if (d && typeof d.codexStatsOn === 'boolean') {
       codexStatsOn = d.codexStatsOn
       if (codexStatsToggle) codexStatsToggle.checked = codexStatsOn
+    }
+    // 0.5.x（数据源切换）：主显示用哪一套口径。缺字段 → 保持现值（绝不落默认，与既有约定一致）。
+    if (d && (d.displaySource === 'magpie' || d.displaySource === 'deepseek')) {
+      setDisplaySource(d.displaySource, { silent: true })
     }
     // 无论服务端带没带这个键都要应用一次：触屏上 ☰ 需要常显（issue #91 缺陷2），
     // 而旧写法只在键存在时才调用，空配置下按钮永远是透明的。
