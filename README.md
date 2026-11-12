@@ -6,7 +6,7 @@ DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图
 
 ## 本 fork 做了什么（相对上游 v0.4.2）
 
-本仓库（[likou123/DeepSeek-Balance-Whale-Widget-Magpie](https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie)）在上游 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `v0.4.2` 基础上，增加了对 [Magpie](https://github.com/yetone/magpie) 本机网关的完整适配，版本号走到 **0.5.3**。
+本仓库（[likou123/DeepSeek-Balance-Whale-Widget-Magpie](https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie)）在上游 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `v0.4.2` 基础上，增加了对 [Magpie](https://github.com/yetone/magpie) 本机网关的完整适配，版本号走到 **0.5.4**。
 
 上游挂件只能看到 **DSH 自己的** API 消耗（`session/event` 里 `assistant/message.usage`）。而 Magpie 是所有 agent 共用的本机网关（默认 `127.0.0.1:3425`），Codex / Claude Code / Gemini CLI / DSH 的请求都从它出去 —— 真实 token 消耗远大于"DSH 一家"的口径。本 fork 补上了这块。
 
@@ -14,10 +14,11 @@ DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图
 |---|---|---|
 | 1 | **Magpie 用量统计** | 新增 `/dsh-whale/magpie.json`：读 Magpie 的 `usage.jsonl` 明细（逐条请求 ⇒ 按北京时间分日、按当时峰谷价折算人民币）+ 网关 `GET /v1/magpie/usage`（连通状态与 `usage.jsonl` 的真实路径）。今日/近 7 天/本月/累计、按模型、按 agent、近 14 天逐日，全部可在面板里看。网关掉线时自动退回明细文件。 |
 | 2 | **Magpie 额度（剩余量）** | 新增 `GET /v1/magpie/quotas` 的读取与归一（`windows[].amount/limit/used/remaining`）。多账号同名窗口合成总账，面板逐账号 + 合计显示，数字与 Magpie 自己的额度页一致。**0.5.3 修**：Magpie 对"已用为 0"的账号会省略 `amount` 字段，旧实现因此把整组判定为"没有总量"⇒ 主显示莫名退回「Magpie 今日已用」；现在用 `limit` + `used%` 反推，并且额度接口失败时沿用最近一次成功的快照（10 分钟）。 |
-| 3 | **主显示数据源多选** | 菜单第一行「显示数据源」= 两个勾选框（DS 余额 / Magpie）。**勾哪个显示哪个，不勾就完全不显示**（含它自己的提醒）：只勾 Magpie 时，DS 的余额预警/今日预算/余额变化弹泡全部静默。设置存 `.dshw-size.json` 的 `displaySources`。 |
-| 4 | **修 bug：配置读到工作目录里的野文件** | 发布副本里 `DATA_CANDIDATES_TAIL` 是空数组，而候选路径都写成 `DATA_CANDIDATES_TAIL[0] + '.dshw-size.json'` ⇒ 拼出**相对路径** `"undefined.dshw-size.json"`（相对宿主 CWD）。实测会导致设置"改了不生效"。改为 `dataTailCandidates()`，没有 tail 就一条都不加。 |
-| 5 | **修 bug：`var` 初始化把元素引用抹成 null** | 两处（`magpieRowTextEl`、`srcDeepBtn/srcMagpieBtn`）：变量在文件更早的位置就写入了元素，而带初始化的 `var x = null` 在更后面执行 ⇒ 引用被抹掉，界面表现是"摘要永远停在读取中""按钮点了没反应"。改为只声明不初始化，并给高亮加了按 `data-dshw` 回查的兜底。 |
-| 6 | **本地冒烟工具** | `tools/dev/`：`mock-host.mjs`（不装 DSH 也能把 `/dsh-whale/*` 跑起来点面板）、`magpie-usage-check.mjs`（Magpie 三种数据源场景自测）、`screenshot.mjs`（无头 Edge 走查并断言气泡文案与勾选状态）。 |
+| 3 | **主显示数据源多选** | 菜单第一行「显示数据源」= 勾选框（DS 余额 / Magpie / **轮换**）。**勾哪个显示哪个，不勾就完全不显示**（含它自己的提醒）：只勾 Magpie 时，DS 的余额预警/今日预算/余额变化弹泡全部静默。设置存 `.dshw-size.json` 的 `displaySources` 与 `displayRotate`。 |
+| 4 | **轮换显示（每次弹气泡换一种口径）** | 勾上「轮换」后，每点开一次气泡就换一种：只勾一个数据源 ⇒ `余额 → 用量 → 余额…`；两个都勾 ⇒ `DS余额 → DS用量 → MP余额 → MP用量 → …`。按可用数据过滤（某项没数据就不进轮换，不会转到空视图）；不勾则固定显示余额/剩余。键 = `displayRotate`。 |
+| 5 | **修 bug：配置读到工作目录里的野文件** | 发布副本里 `DATA_CANDIDATES_TAIL` 是空数组，而候选路径都写成 `DATA_CANDIDATES_TAIL[0] + '.dshw-size.json'` ⇒ 拼出**相对路径** `"undefined.dshw-size.json"`（相对宿主 CWD）。实测会导致设置"改了不生效"。改为 `dataTailCandidates()`，没有 tail 就一条都不加。 |
+| 6 | **修 bug：`var` 初始化把元素引用抹成 null** | 两处（`magpieRowTextEl`、`srcDeepBtn/srcMagpieBtn`）：变量在文件更早的位置就写入了元素，而带初始化的 `var x = null` 在更后面执行 ⇒ 引用被抹掉，界面表现是"摘要永远停在读取中""按钮点了没反应"。改为只声明不初始化，并给高亮加了按 `data-dshw` 回查的兜底。 |
+| 7 | **本地冒烟工具** | `tools/dev/`：`mock-host.mjs`（不装 DSH 也能把 `/dsh-whale/*` 跑起来点面板）、`magpie-usage-check.mjs`（Magpie 三种数据源场景自测）、`screenshot.mjs`（无头 Edge 走查并断言气泡文案与勾选状态）。 |
 
 不改动上游既有行为：两套口径永远不互相记账、也不相加；Magpie 相关代码自成一块，只读 Magpie 的文件与接口，不写它的任何数据。四道仓库门禁（图层审计 / 核心不变量 / 死键初筛 / 审计自检）全部保持通过。
 
@@ -142,10 +143,11 @@ DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图
 
 看到什么：
 
-- **主菜单「显示数据源」是多选（勾选框）**：`DS 余额` / `Magpie`，**勾哪个就显示哪个，不勾就完全不显示**（连它自己的提醒泡泡也不弹）。至少保留一个，全取消会被挡回去并说明原因。
+- **主菜单「显示数据源」是多选（勾选框）**：`DS 余额` / `Magpie` / `轮换`，**勾哪个就显示哪个，不勾就完全不显示**（连它自己的提醒泡泡也不弹）。至少保留一个，全取消会被挡回去并说明原因。
   - 只勾 `DS 余额`（默认）：大数字 = DeepSeek 余额，提示行 = 今日已用（余额观测口径）。
   - 只勾 `Magpie`：大数字 = Magpie 的**剩余额度**（多账号合计，取最紧的那条额度窗口），提示行 = `剩 x% · 今日 ¥y`；没有额度窗口（按量付费的 key）时退回「今日已用 ¥y」。**DS 的余额预警 / 今日预算提醒与余额变化弹泡全部静默**（这就是"每次启动都弹 DS 余额不足"的来源）。
   - 两个都勾：大数字仍是 DS 余额，提示行让给 Magpie（`Magpie 1932万 · 剩 96.6%`）——一行里塞两套"今日已用"会挤爆，所以 Magpie 只占提示行。
+  - **勾上 `轮换`**：每点开一次气泡就换一种口径 —— 只勾一个数据源时在「余额 ↔ 今日已用」之间轮换；两个都勾时在「DS余额 → DS用量 → MP余额 → MP用量」四种之间轮换。没有数据的口径不会进轮换，所以不会转到空白页。不勾则固定显示余额/剩余。
 - 主菜单多一行 **「Magpie 用量」**：`今日 4721 万 tok · ¥ 2.76`，点「查看」打开统计窗口。
 - 统计窗口里：**额度（剩余量）**（逐账号 + 合计，与 Magpie 自己的额度页同源）、**今日 / 近 7 天 / 本月 / 累计**四段（调用次数、失败数、输入、缓存命中及其命中率、输出与其中的思考 token、合计 tokens、折算金额）、**今日按模型**、**今日按 agent** 的拆分、**近 14 天**逐日列表。
 - 设置项：**开关**（关掉后宿主完全不读 Magpie，不联网也不读文件）与**网关地址**（默认 `http://127.0.0.1:3425`；被环境变量 `MAGPIE_BASE_URL` 锁定时输入框禁用）。

@@ -2262,6 +2262,14 @@ srcDeepChk = srcDeepEls.ck
 srcMagpieChk = srcMagpieEls.ck
 srcWrap.appendChild(srcDeepEls.wrap)
 srcWrap.appendChild(srcMagpieEls.wrap)
+// 轮换：勾上后每次弹出气泡换一种口径（余额 ↔ 用量）；两个数据源都勾时是四种
+var srcRotateEls = mkSrcChk('轮换', 'rotate', '勾上：每弹一次气泡换一种口径 —— 只勾一个数据源时在「余额 ↔ 今日已用」之间轮换；两个都勾时在「DS余额 / DS用量 / MP余额 / MP用量」四种之间轮换。不勾则固定显示余额/剩余', true)
+srcRotateChk = srcRotateEls.ck
+srcRotateEls.ck.addEventListener('change', function (e) {
+  e.stopPropagation()
+  displayRotateChanged(srcRotateEls.ck.checked)
+})
+srcWrap.appendChild(srcRotateEls.wrap)
 rowSrc.appendChild(srcWrap)
 menuBox.appendChild(rowSrc)
 try { syncDisplaySourceUI() } catch (err) {}
@@ -6549,6 +6557,23 @@ function fillMagpieWindow(d) {
       + (d.file && d.file.path ? ' · 明细 ' + d.file.path : '')
       + (d.at ? ' · 扫描于 ' + aboutFmtTime(d.at) : '')
     st.appendChild(stS)
+    // 额度如果走的是兜底快照，这里说清（否则用户会以为剩余量是实时读数）
+    try {
+      if (d.quotas && d.quotas.ok && d.quotas.stale) {
+        var stQ = document.createElement('div')
+        stQ.className = 'dshwv-usage-hint'
+        stQ.textContent = '⚠ ' + String(d.quotas.error || '额度为缓存快照')
+        st.appendChild(stQ)
+      }
+    } catch (err) {}
+    // 轮换自检：当前开没开、有几种可用口径、正在显示哪一种。
+    // 这条是给"为什么只看到一种口径"这类问题准备的现场证据。
+    try {
+      var stR = document.createElement('div')
+      stR.className = 'dshwv-usage-hint'
+      stR.textContent = displayVariantInfoText()
+      st.appendChild(stR)
+    } catch (err) {}
   }
   body.appendChild(st)
   // ② 设置
@@ -17799,6 +17824,9 @@ function bubbleResetTtl() {
   else bubbleTtlClear()
 }
 // 默认内容视图 = 现在待机内容(余额/今日已用),由 render/restore 维护
+// ⚠️ 注意：**默认气泡实际走的是模块渲染链**（bubbleDefaultQueue 第一项是 kind:'custom'），
+//   这个函数只服务旧的 kind:'normal' 路径；轮换的推进统一放在 bubbleShowSeqNext 里，
+//   不要在这里再加一次（否则会一次点击切两种）。
 function bubbleRenderDefault() { restoreBubbleLines() }
 // 随机台词段:每次展示按权重重抽(老 RANDOM_GROUPS),含 gif 槽与失败降级
 function bubbleRenderRandom(lines) {
@@ -17848,6 +17876,10 @@ function bubbleShowSeqNext() {
   var step = bubbleSeq[bubbleSeqIdx]
   if (!step) { hideBubble(); return }
   bubbleSeqIdx++
+  // 0.5.4（用户要求）：每展开一轮气泡就往前轮换一种口径。
+  //   放在"本轮第一项"上 —— 手动点击序列是[默认内容, 随机台词]，所以每点开一次气泡换一次；
+  //   余额变化/系统泡泡不走这里，不会偷偷推着转。
+  try { if (bubbleSeqIdx === 1 && displayRotate) advanceVariantForOpen() } catch (err) {}
   var item = bubbleIsChoice(step) ? bubblePickChoiceStep(step) : step
   if (!item) { hideBubble(); return }
   // v821（P1）：先按"这一项用的框"重画形状，再渲染内容（形状与内容同一帧出现，不会闪）
@@ -17882,16 +17914,44 @@ function bubbleModuleFontU(level) {
   return Math.round(40 + (n - 1) * 200 / 49)
 }
 function bubbleAmountText() {
-  // 数据源 = Magpie：大数字换成网关口径（剩余额度；没有额度就退回今日折算）
+  // 0.5.4（用户要求）：按当前「口径变体」给大数字。
+  //   ds-balance=DS 余额 · ds-usage=DS 今日已用 · mp-balance=Magpie 剩余额度 · mp-usage=Magpie 今日折算
+  // ⚠️ 默认气泡走的是**模块渲染链**（bubbleDefaultQueue 的第一项是 kind:'custom' + modules），
+  //   所以轮换必须落在这里，而不是 render()（render 只服务旧的三行渲染路径）。
+  var vk = ''
+  try { vk = currentVariantKey() } catch (err) { vk = '' }
+  if (vk === 'ds-usage') {
+    return state.todayUsage !== null && state.todayUsage !== undefined
+      ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--'
+  }
+  if (vk === 'mp-balance') return magpieMainAmountText()
+  if (vk === 'mp-usage') {
+    var t = magpieView && magpieView.today ? magpieView.today : null
+    return t ? fmt(t.cny, 'CNY') : '--'
+  }
   if (displaySource === 'magpie') return magpieMainAmountText()
   var v = shown !== null ? shown : (state.balance !== null ? state.balance : null)
   if (v === null) return '…'
   return fmt(v, state.currency)
 }
 function bubbleTodayText() {
+  var vk = ''
+  try { vk = currentVariantKey() } catch (err) { vk = '' }
+  var dsToday = (state.usageLabel || '今日已用') + ' ' + (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
+  if (vk === 'ds-balance') {
+    // 两个数据源都勾、但**没开轮换**时，提示行仍然让给 Magpie 摘要（与 0.5.2 行为一致）
+    if (sourceOn('magpie') && displayRotate === false) { var mh0 = magpieInlineHintText(); if (mh0) return mh0 }
+    return dsToday
+  }
+  if (vk === 'ds-usage') return '余额 ' + (state.balance !== null ? fmt(state.balance, state.currency) : '--')
+  if (vk === 'mp-balance') return magpieMainHintText()
+  if (vk === 'mp-usage') {
+    var t = magpieView && magpieView.today ? magpieView.today : null
+    return t ? (fmtTokShort(t.tokens) + ' tok · ' + t.calls + ' 次') : '--'
+  }
   if (displaySource === 'magpie') return magpieMainHintText()
   if (sourceOn('magpie')) { var mh = magpieInlineHintText(); if (mh) return mh }
-  return (state.usageLabel || '今日已用') + ' ' + (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
+  return dsToday
 }
 // v782：赠金 / 充值余额两个数值模块的取数（与「总余额(充值金额+赠金)」同源：宿主余额返回体）。
 //   ⚠️ 两个数字**可能拿不到**（厂商没有该字段、或未登录账号）⇒ 显示 `—`，**不显示 0**
@@ -17931,6 +17991,17 @@ function magpieMainHintText() {
   return '没有用量数据'
 }
 // 两个数据源都勾上时，提示行给 Magpie 用的紧凑摘要（拿不到就返回空串，让调用方保留 DS 原文）
+// 当前口径对应的「标签」文案（供内建默认标签替换用）
+function variantLabelText() {
+  var vk = ''
+  try { vk = currentVariantKey() } catch (err) { vk = '' }
+  if (vk === 'ds-usage') return 'DeepSeek 今日已用'
+  if (vk === 'mp-balance') return magpieMainLabelText()
+  if (vk === 'mp-usage') return 'Magpie 今日已用'
+  if (vk === 'ds-balance') return 'DeepSeek 余额'
+  // 没有任何可用变体（还在加载）：按数据源给个合理默认
+  return displaySource === 'magpie' ? magpieMainLabelText() : 'DeepSeek 余额'
+}
 function magpieInlineHintText() {
   try {
     var mv = magpieView
@@ -18771,18 +18842,12 @@ function bubbleRowContentOf(mod) {
   if (mod.type === 'bonus') return { txt: bubbleContentText(mod, bubbleBonusText()), line: null }
   if (mod.type === 'recharge') return { txt: bubbleContentText(mod, bubbleRechargeText()), line: null }
   if (mod.type === 'today') {
-    // 数据源 = Magpie：自动内容换成「剩 x% · 今日 ¥y」，不再说"今日已用 <DS 金额>"。
-    // 只替换**内建默认模板**（'今日已用 {expense_ds}' 或没填）——用户自己写的模板照旧按占位符渲染。
-    if (displaySource === 'magpie' && !bubbleIsModelMod(mod)) {
+    // 内建默认模板（'今日已用 {expense_ds}' 或没填）⇒ 自动内容交给 bubbleTodayText()，
+    // 它已经按**当前口径变体**给出对应的提示行（DS 今日已用 / DS 余额 / Magpie 剩% / Magpie tok·次）。
+    // 用户自己写的模板照旧按占位符渲染，一个字都不改。
+    if (!bubbleIsModelMod(mod)) {
       var tplTxt = String(mod.tpl || '').trim()
-      if (!tplTxt || tplTxt === '今日已用 {expense_ds}') return { txt: magpieMainHintText(), line: null }
-      return { txt: bubbleContentText(mod, magpieMainHintText()), line: null }
-    }
-    // 两个数据源都勾：提示行让给 Magpie（与 render() 同一条规则）
-    if (sourceOn('magpie') && !bubbleIsModelMod(mod)) {
-      var tplTxt2 = String(mod.tpl || '').trim()
-      var mh2 = magpieInlineHintText()
-      if (mh2 && (!tplTxt2 || tplTxt2 === '今日已用 {expense_ds}')) return { txt: mh2, line: null }
+      if (!tplTxt || tplTxt === '今日已用 {expense_ds}') return { txt: bubbleTodayText(), line: null }
     }
     var tv2 = bubbleIsModelMod(mod) ? apiModelTodayText(mod.modelId) : (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
     return { txt: bubbleContentText(mod, '今日已用 ' + tv2), line: null }
@@ -18814,9 +18879,9 @@ function bubbleRowContentOf(mod) {
     return { txt: '', line: null }
   }
   var tailTxt = mod.text || ''
-  // 数据源 = Magpie 时，把**内建默认标签**「DeepSeek 余额」换成 Magpie 的说法
-  // （只替换这一个内建文案：用户自己改过的文字一个字都不动 —— 否则等于悄悄改用户配置）。
-  if (displaySource === 'magpie' && String(tailTxt).trim() === 'DeepSeek 余额') tailTxt = magpieMainLabelText()
+  // 内建默认标签「DeepSeek 余额」随当前口径变（轮换时也跟着变）。
+  // 只替换这一个内建文案：用户自己改过的文字一个字都不动 —— 否则等于悄悄改用户配置。
+  if (String(tailTxt).trim() === 'DeepSeek 余额') tailTxt = variantLabelText()
   return { txt: tailTxt, line: null }
 }
 // 渲染一组模块为泡泡内容(F2 渲染层:按行分组 → 行内 flex 并排(≤6 模块/行)→ 超宽自动折行;
@@ -19589,6 +19654,11 @@ function animateAmount(from, to, currency, duration) {
 function render() {
   // 消耗金额泡泡显示期间，余额渲染不覆盖其内容（金额行/标题行/提示行）
   if (costBubbleActive) return
+  // 0.5.4：有可用口径就按「当前变体」渲染（轮换开关决定是否换）。
+  // 变体列表按数据可用性过滤，所以这里拿到 key 就一定有数据。
+  var vkey = ''
+  try { vkey = currentVariantKey() } catch (err) {}
+  if (vkey) { renderVariant(vkey); return }
   // 0.5.x（用户要求）：主显示可以切到 Magpie 口径 —— 走单独一条渲染路径，
   // 不去改原来那条余额逻辑（那条牵着记账、峰谷、动画、预警，动它风险远大于收益）。
   if (displaySource === 'magpie') { renderMagpieMain(); return }
@@ -19650,6 +19720,13 @@ function renderMagpieMain() {
 var DISPLAY_SOURCE_KEYS = ['deepseek', 'magpie']
 var displaySources = { deepseek: true, magpie: false }
 var displaySource = 'deepseek'
+// 0.5.4（用户要求「化 bug 为功能」）：主显示**轮换**。每弹一次默认气泡就换一种口径：
+//   勾一个数据源 ⇒ 两种（余额 ↔ 用量）；两个都勾 ⇒ 四种（DS余额 / DS用量 / MP余额 / MP用量）。
+//   顺序固定、按可用数据过滤（某项没数据就不进轮换，避免转到空视图）。
+//   `bubbleVariantShown` = **上一次实际展示过的**变体序号（-1 = 还没展示过）：
+//   第一次打开固定从第 0 种开始，之后每次新开一轮 +1，跟人预期的"第一下是余额、第二下换一个"一致。
+var displayRotate = true
+var bubbleVariantShown = -1
 function sourceOn(name) { return !!displaySources[name] }
 function primaryDisplaySourceOf(set) {
   var s = set || displaySources
@@ -19661,6 +19738,80 @@ function displaySourcesArray() {
   var out = []
   for (var i = 0; i < DISPLAY_SOURCE_KEYS.length; i++) if (displaySources[DISPLAY_SOURCE_KEYS[i]]) out.push(DISPLAY_SOURCE_KEYS[i])
   return out
+}
+// —— 轮换用的「口径变体」 ——
+// ds-balance：DS 余额（提示行今日已用）· ds-usage：DS 今日已用（提示行余额）
+// mp-balance：Magpie 剩余额度（提示行剩%+今日）· mp-usage：Magpie 今日已用（提示行 tok/次数）
+// 轮换现场信息（面板里显示，用于回答"为什么只看到一种口径"）
+function displayVariantInfoText() {
+  try {
+    var list = displayVariants()
+    var cur = currentVariantKey()
+    var names = { 'ds-balance': 'DS余额', 'ds-usage': 'DS用量', 'mp-balance': 'MP余额', 'mp-usage': 'MP用量' }
+    var curName = names[cur] || '—'
+    var listNames = []
+    for (var i = 0; i < list.length; i++) listNames.push(names[list[i]] || list[i])
+    var src = []
+    if (sourceOn('deepseek')) src.push('DS')
+    if (sourceOn('magpie')) src.push('Magpie')
+    return '轮换 ' + (displayRotate ? '开' : '关') + ' · 数据源 ' + src.join('+')
+      + ' · 可用 ' + list.length + ' 种' + (listNames.length ? '（' + listNames.join(' / ') + '）' : '')
+      + ' · 当前 ' + curName
+  } catch (err) { return '轮换状态读取失败' }
+}
+function magpieQuotaPrimary() {
+  try {
+    var mv = magpieView
+    var p = mv && mv.quota && mv.quota.primary
+    if (p && p.remaining !== null && p.remaining !== undefined) return p
+  } catch (err) {}
+  return null
+}
+function displayVariants() {
+  var out = []
+  try {
+    if (sourceOn('deepseek')) {
+      if (state.balance !== null && state.balance !== undefined) out.push('ds-balance')
+      if (state.todayUsage !== null && state.todayUsage !== undefined) out.push('ds-usage')
+    }
+    if (sourceOn('magpie') && magpieView && magpieView.ok) {
+      if (magpieQuotaPrimary()) out.push('mp-balance')
+      if (magpieView.today) out.push('mp-usage')
+    }
+  } catch (err) {}
+  return out
+}
+function currentVariantKey() {
+  var list = displayVariants()
+  var n = list.length
+  if (!n) return ''
+  if (!displayRotate) return list[0] // 不轮换：始终第一种（= 各数据源的"余额/剩余"，与旧行为一致）
+  var idx = bubbleVariantShown < 0 ? 0 : (bubbleVariantShown % n)
+  return list[idx]
+}
+// 每次"新开一轮气泡"时推进一次（第一次固定第 0 种）
+function advanceVariantForOpen() {
+  var n = displayVariants().length
+  if (!n) return
+  if (bubbleVariantShown < 0) bubbleVariantShown = 0
+  else bubbleVariantShown = (bubbleVariantShown + 1) % n
+}
+function displayRotateChanged(on) {
+  displayRotate = on !== false
+  bubbleVariantShown = -1
+  try { syncDisplaySourceUI() } catch (err) {}
+  try { render() } catch (err) {}
+  try { dshwvToast(displayRotate ? '已开启轮换：每次弹气泡换一种口径' : '已关闭轮换：固定显示余额/剩余', 'ok', 1500) } catch (err) {}
+  try { saveConfig() } catch (err) {}
+}
+function applyDisplayRotate(on, opts) {
+  var next = on !== false
+  var changed = next !== displayRotate
+  displayRotate = next
+  try { syncDisplaySourceUI() } catch (err) {}
+  if (!changed) return
+  bubbleVariantShown = -1
+  try { render() } catch (err) {}
 }
 function applyDisplaySources(list, opts) {
   var raw = Array.isArray(list) ? list : []
@@ -19710,8 +19861,44 @@ function syncDisplaySourceUI() {
     // 双保险：引用被意外清掉时按 data-dshw 重新找，保证"勾选状态不跟着走"不会静默发生。
     var d = srcDeepChk || document.querySelector('[data-dshw="src-deepseek"]')
     var m = srcMagpieChk || document.querySelector('[data-dshw="src-magpie"]')
+    var r = srcRotateChk || document.querySelector('[data-dshw="src-rotate"]')
     if (d) { if (!srcDeepChk) srcDeepChk = d; d.checked = !!displaySources.deepseek }
     if (m) { if (!srcMagpieChk) srcMagpieChk = m; m.checked = !!displaySources.magpie }
+    if (r) { if (!srcRotateChk) srcRotateChk = r; r.checked = displayRotate !== false }
+  } catch (err) {}
+}
+// 0.5.4：按「口径变体」渲染三行（标签 / 大数字 / 提示行）。
+//   · ds-balance  DS 余额 + 今日已用
+//   · ds-usage    DS 今日已用 + 余额
+//   · mp-balance  Magpie 剩余额度 + 剩%·今日折算
+//   · mp-usage    Magpie 今日已用 + tok/次数
+// 只动这三行文字：记账、动画（shown）、峰谷行、模块化布局都不碰。
+function renderVariant(key) {
+  try {
+    var label = 'DeepSeek 余额'
+    var amount = '…'
+    var hint = ''
+    if (key === 'ds-balance') {
+      amount = shown !== null ? fmt(shown, state.currency) : (state.balance !== null ? fmt(state.balance, state.currency) : '…')
+      hint = (state.usageLabel || '今日已用') + ' ' + (state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--')
+    } else if (key === 'ds-usage') {
+      label = 'DeepSeek 今日已用'
+      amount = state.todayUsage !== null && state.todayUsage !== undefined ? fmt(state.todayUsage, state.todayUsageCurrency || state.currency) : '--'
+      hint = '余额 ' + (state.balance !== null ? fmt(state.balance, state.currency) : '--')
+    } else if (key === 'mp-balance') {
+      label = magpieMainLabelText()
+      amount = magpieMainAmountText()
+      hint = magpieMainHintText()
+    } else if (key === 'mp-usage') {
+      var today = magpieView && magpieView.today ? magpieView.today : null
+      label = 'Magpie 今日已用'
+      amount = today ? fmt(today.cny, 'CNY') : '--'
+      hint = today ? (fmtTokShort(today.tokens) + ' tok · ' + today.calls + ' 次') : '--'
+    }
+    labelEl.textContent = label
+    amountEl.textContent = amount
+    if (bubbleRandomActive && bubbleRandomLines) applyBubbleLines(bubbleRandomLines)
+    else setHint(hint)
   } catch (err) {}
 }
 function express() {
@@ -19974,6 +20161,7 @@ var magpieView = null
 //   （本批真的踩过两次：magpieRowTextEl 与这两个按钮）。这里只留声明。
 var srcDeepChk
 var srcMagpieChk
+var srcRotateChk
 // issue #116：Codex 本机统计开关。关掉后宿主完全不扫 ~/.codex/sessions（适合会话日志很大的机器）。
 // v748：默认值仍是「开」，但**宿主会先看有没有 Codex 模型** —— 没配就一律按关闭处理，
 // 所以这里保持默认 true 是安全的（不会让没配 Codex 的用户被扫盘），也不会因为一次普通保存
@@ -20034,7 +20222,7 @@ function configPayload() {
   //   宿主白名单、读侧合并、客户端回填都做了，唯独这里没发 ⇒ 宿主 pickB 走"沿用旧值(true)" ⇒ 永远存不住。
   //   与 v863 的 subagent.mute 是同一类"半截活"：新键必须走完 **四件套**
   //   ① 客户端 PUT 载荷 → ② 宿主写侧白名单 → ③ 宿主读侧合并 → ④ 客户端回填。
-  return JSON.stringify({ scale: state.scale, sound: soundOn, pressOn: pressOn !== false, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx, menuBtnHide: menuBtnHide, codexStatsOn: codexStatsOn, displaySources: displaySourcesArray() })
+  return JSON.stringify({ scale: state.scale, sound: soundOn, pressOn: pressOn !== false, vol: soundVol, soundSet: soundSet, usageMode: usageMode, peakMode: peakMode, bubbleOn: bubbleOn, turnCostOn: turnCostOn, turnCostCloseMs: turnCostCloseMs, scrollGapOn: scrollGapOn, scrollGapPx: scrollGapPx, menuBtnHide: menuBtnHide, codexStatsOn: codexStatsOn, displaySources: displaySourcesArray(), displayRotate: displayRotate !== false })
 }
 // 真正的 PUT：读响应 → 失败（网络异常 / HTTP!=200 / {ok:false}）静默重试一次 → 仍失败才提示
 function configPut(payload, retried) {
@@ -22821,6 +23009,10 @@ function sizeCfgApply(d) {
     } else if (d && (d.displaySource === 'magpie' || d.displaySource === 'deepseek')) {
       // 老配置（0.5.0/0.5.1 只存字符串）
       try { applyDisplaySources([d.displaySource], { silent: true }) } catch (err) {}
+    }
+    // 0.5.4：轮换开关（缺字段保持现值）
+    if (d && typeof d.displayRotate === 'boolean') {
+      try { applyDisplayRotate(d.displayRotate, { silent: true }) } catch (err) {}
     }
     // 无论服务端带没带这个键都要应用一次：触屏上 ☰ 需要常显（issue #91 缺陷2），
     // 而旧写法只在键存在时才调用，空配置下按钮永远是透明的。
