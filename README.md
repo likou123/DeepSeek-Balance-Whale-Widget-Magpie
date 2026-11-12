@@ -6,14 +6,14 @@ DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图
 
 ## 本 fork 做了什么（相对上游 v0.4.2）
 
-本仓库（[likou123/DeepSeek-Balance-Whale-Widget-Magpie](https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie)）在上游 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `v0.4.2` 基础上，增加了对 [Magpie](https://github.com/yetone/magpie) 本机网关的完整适配，版本号走到 **0.5.2**。
+本仓库（[likou123/DeepSeek-Balance-Whale-Widget-Magpie](https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie)）在上游 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `v0.4.2` 基础上，增加了对 [Magpie](https://github.com/yetone/magpie) 本机网关的完整适配，版本号走到 **0.5.3**。
 
 上游挂件只能看到 **DSH 自己的** API 消耗（`session/event` 里 `assistant/message.usage`）。而 Magpie 是所有 agent 共用的本机网关（默认 `127.0.0.1:3425`），Codex / Claude Code / Gemini CLI / DSH 的请求都从它出去 —— 真实 token 消耗远大于"DSH 一家"的口径。本 fork 补上了这块。
 
 | # | 改动 | 说明 |
 |---|---|---|
 | 1 | **Magpie 用量统计** | 新增 `/dsh-whale/magpie.json`：读 Magpie 的 `usage.jsonl` 明细（逐条请求 ⇒ 按北京时间分日、按当时峰谷价折算人民币）+ 网关 `GET /v1/magpie/usage`（连通状态与 `usage.jsonl` 的真实路径）。今日/近 7 天/本月/累计、按模型、按 agent、近 14 天逐日，全部可在面板里看。网关掉线时自动退回明细文件。 |
-| 2 | **Magpie 额度（剩余量）** | 新增 `GET /v1/magpie/quotas` 的读取与归一（`windows[].amount/limit/used/remaining`）。多账号同名窗口合成总账，面板逐账号 + 合计显示，数字与 Magpie 自己的额度页一致。 |
+| 2 | **Magpie 额度（剩余量）** | 新增 `GET /v1/magpie/quotas` 的读取与归一（`windows[].amount/limit/used/remaining`）。多账号同名窗口合成总账，面板逐账号 + 合计显示，数字与 Magpie 自己的额度页一致。**0.5.3 修**：Magpie 对"已用为 0"的账号会省略 `amount` 字段，旧实现因此把整组判定为"没有总量"⇒ 主显示莫名退回「Magpie 今日已用」；现在用 `limit` + `used%` 反推，并且额度接口失败时沿用最近一次成功的快照（10 分钟）。 |
 | 3 | **主显示数据源多选** | 菜单第一行「显示数据源」= 两个勾选框（DS 余额 / Magpie）。**勾哪个显示哪个，不勾就完全不显示**（含它自己的提醒）：只勾 Magpie 时，DS 的余额预警/今日预算/余额变化弹泡全部静默。设置存 `.dshw-size.json` 的 `displaySources`。 |
 | 4 | **修 bug：配置读到工作目录里的野文件** | 发布副本里 `DATA_CANDIDATES_TAIL` 是空数组，而候选路径都写成 `DATA_CANDIDATES_TAIL[0] + '.dshw-size.json'` ⇒ 拼出**相对路径** `"undefined.dshw-size.json"`（相对宿主 CWD）。实测会导致设置"改了不生效"。改为 `dataTailCandidates()`，没有 tail 就一条都不加。 |
 | 5 | **修 bug：`var` 初始化把元素引用抹成 null** | 两处（`magpieRowTextEl`、`srcDeepBtn/srcMagpieBtn`）：变量在文件更早的位置就写入了元素，而带初始化的 `var x = null` 在更后面执行 ⇒ 引用被抹掉，界面表现是"摘要永远停在读取中""按钮点了没反应"。改为只声明不初始化，并给高亮加了按 `data-dshw` 回查的兜底。 |
