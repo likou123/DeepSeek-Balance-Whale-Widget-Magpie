@@ -22,23 +22,6 @@ DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图
 
 不改动上游既有行为：两套口径永远不互相记账、也不相加；Magpie 相关代码自成一块，只读 Magpie 的文件与接口，不写它的任何数据。四道仓库门禁（图层审计 / 核心不变量 / 死键初筛 / 审计自检）全部保持通过。
 
-> ⚠️ **Codex 版小鲸鱼已迁至独立仓库** → <https://github.com/Yang-huai406/Codex-Whale-Public>（**已安装用户无需重装**；详见下方「两条分支怎么选」）
-<!-- 迁移横幅（v0.3.19 起）：迁移稳定后（约 2026-11，或发过 1–2 个版本）可只删这一行 blockquote，保留下方分支表与「致谢」——别让它长期占着第一屏 -->
-
-## 两条分支怎么选
-
-本仓库现在只维护**一条产品线**（`main`，同一个包同时支持 DSH Web 与官方桌面客户端）。按你要挂在哪里选：
-
-| 你要挂在哪 | 用哪条分支 | 安装方式 |
-|---|---|---|
-| **DSH Web 界面右下角**（就是这个 README 描述的插件） | `main`（默认分支） | `dsh plugin --profile web add dsh-whale-widget`（推荐，装 npm 已发布版）；也可以从本仓库装 `dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget`，但那样装的是 **main 当前状态、不跟随已发布版本** |
-| **官方桌面客户端（Electron）右下角** | `main`（同一个包） | ⚠️ **不能用** `--profile web`（桌面端读的是 `desktop` profile，CLI 也拒绝 `--profile desktop`）—— 在桌面端会话里**让 DSH 自己装**，见下方「官方桌面端（Electron 客户端）请先看这一节」 |
-| **Codex 桌面应用**（跟随 Codex 窗口、无独立网页） | ⚠️ **已迁出本仓库** | [新仓库](https://github.com/Yang-huai406/Codex-Whale-Public) · [最新版下载](https://github.com/Yang-huai406/Codex-Whale-Public/releases/latest) · **已安装用户无需重装**<br>**Codex 版迁移公告**：本次迁移保留了**开发历史、历代版本与作者贡献**，并清理了旧图片中的非必要元数据（贡献者致谢见文末「致谢」）。后续更新、问题反馈与版本发布都在新仓库；反馈问题时请注明**版本、系统和复现步骤**，勿上传密钥、完整配置或未脱敏日志。 |
-
-⚠️ **两条线互不兼容**：Codex 版不能用 `dsh plugin … add` 装进 DSH 网页，本仓库的插件也不能在 Codex 桌面里运行。
-
-⚠️ **安装方式二选一、别混用**（npm 名 / `github:`）—— 它们是同一个包名，先后安装会并存冲突；已经是 `github:` 装的，要换 npm 名请先 `dsh plugin --profile web remove dsh-whale-widget`。
-
 ## 特性
 
 ### 记账与显示
