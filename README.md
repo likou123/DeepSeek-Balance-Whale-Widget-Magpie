@@ -4,16 +4,42 @@
 
 DeepSeek Harness（DSH）Web 界面右下角的常驻挂件：小鲸鱼气泡图 + DeepSeek API 余额 + 今日已用 + 每轮对话消耗，并且**泡泡内容可以完全自定义**（点击序列、模块化排版、并列加权出泡、随机语句/随机图片）。标准 DSH bundle 插件，`dsh plugin` 一键安装，无需任何会话令牌。
 
+## 安装（三选一 · 均已验证）
+
+> **当前版本 `0.4.2-magpie`**（= 上游 `0.4.2` + Magpie 适配）｜ 最新发布：<https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie/releases/latest>
+> ⚠️ 本包**未发布到 npm**，请从 GitHub 或本地目录安装；装完**必须重启**宿主（桌面端退出客户端重开，Web 端重启 `dsh web`），再刷新页面（Ctrl+F5）。
+
+**① 官方桌面客户端（推荐）** ✅ 已实测 — 在 DSH 会话里说一句即可：
+
+> 请使用当前桌面端内置的 `plugin_manager` 安装 `github:likou123/DeepSeek-Balance-Whale-Widget-Magpie`，装完告诉我结果以及是否需要重启。
+
+**② Web（`dsh web`）** ⚠️ 命令按上游既有用法给出（本机 PATH 无 `dsh`，未在本机复跑；同一安装规格已通过 `plugin_manager` 验证可用）：
+
+```powershell
+dsh plugin --profile web add github:likou123/DeepSeek-Balance-Whale-Widget-Magpie
+```
+
+**③ 本地目录（开发用）** ✅ 已实测 — 改代码后只需重启，不必重装：
+
+```powershell
+dsh plugin --profile web add link:D:\DSH\DeepSeek-Balance-Whale-Widget
+```
+
+**装完这样验证**：菜单底部版号显示 **`0.4.2-magpie`** → 点版号进「关于 / 自检」能看到插件名与数据目录 → 访问 `/dsh-whale/magpie.json` 返回 **401/403 属正常**（说明路由已注册且信任栅栏在工作），带会话的浏览器访问才是 200。
+
 ## 本 fork 做了什么（相对上游 v0.4.2）
 
-本仓库（[likou123/DeepSeek-Balance-Whale-Widget-Magpie](https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie)）在上游 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `v0.4.2` 基础上，增加了对 [Magpie](https://github.com/yetone/magpie) 本机网关的完整适配，版本号走到 **0.5.4**。
+本仓库（[likou123/DeepSeek-Balance-Whale-Widget-Magpie](https://github.com/likou123/DeepSeek-Balance-Whale-Widget-Magpie)）在上游 [MeteorNOX/DeepSeek-Balance-Whale-Widget](https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget) 的 `v0.4.2` 基础上，增加了对 [Magpie](https://github.com/yetone/magpie) 本机网关的完整适配。
+
+**版本号规则**：`<上游正式版>-magpie`（当前 `0.4.2-magpie`）；同一上游版本内再迭代 → `0.4.2-magpie.2`、`0.4.2-magpie.3`；上游发新版本 → 前缀跟着走（如 `0.4.3-magpie`）。
+（`-magpie` 属 semver 预发布标记，排序低于同号正式版；因为本项目不走 npm、安装只认 GitHub，所以不影响使用。）
 
 上游挂件只能看到 **DSH 自己的** API 消耗（`session/event` 里 `assistant/message.usage`）。而 Magpie 是所有 agent 共用的本机网关（默认 `127.0.0.1:3425`），Codex / Claude Code / Gemini CLI / DSH 的请求都从它出去 —— 真实 token 消耗远大于"DSH 一家"的口径。本 fork 补上了这块。
 
 | # | 改动 | 说明 |
 |---|---|---|
 | 1 | **Magpie 用量统计** | 新增 `/dsh-whale/magpie.json`：读 Magpie 的 `usage.jsonl` 明细（逐条请求 ⇒ 按北京时间分日、按当时峰谷价折算人民币）+ 网关 `GET /v1/magpie/usage`（连通状态与 `usage.jsonl` 的真实路径）。今日/近 7 天/本月/累计、按模型、按 agent、近 14 天逐日，全部可在面板里看。网关掉线时自动退回明细文件。 |
-| 2 | **Magpie 额度（剩余量）** | 新增 `GET /v1/magpie/quotas` 的读取与归一（`windows[].amount/limit/used/remaining`）。多账号同名窗口合成总账，面板逐账号 + 合计显示，数字与 Magpie 自己的额度页一致。**0.5.3 修**：Magpie 对"已用为 0"的账号会省略 `amount` 字段，旧实现因此把整组判定为"没有总量"⇒ 主显示莫名退回「Magpie 今日已用」；现在用 `limit` + `used%` 反推，并且额度接口失败时沿用最近一次成功的快照（10 分钟）。 |
+| 2 | **Magpie 额度（剩余量）** | 新增 `GET /v1/magpie/quotas` 的读取与归一（`windows[].amount/limit/used/remaining`）。多账号同名窗口合成总账，面板逐账号 + 合计显示，数字与 Magpie 自己的额度页一致。**踩坑修复**：Magpie 对"已用为 0"的账号会省略 `amount` 字段，早期实现因此把整组判定为"没有总量"⇒ 主显示莫名退回「Magpie 今日已用」；现在用 `limit` + `used%` 反推，并且额度接口失败时沿用最近一次成功的快照（进程内 10 分钟 / 磁盘 24 小时）。 |
 | 3 | **主显示数据源多选** | 菜单第一行「显示数据源」= 勾选框（DS 余额 / Magpie / **轮换**）。**勾哪个显示哪个，不勾就完全不显示**（含它自己的提醒）：只勾 Magpie 时，DS 的余额预警/今日预算/余额变化弹泡全部静默。设置存 `.dshw-size.json` 的 `displaySources` 与 `displayRotate`。 |
 | 4 | **轮换显示（每次弹气泡换一种口径）** | 勾上「轮换」后，每点开一次气泡就换一种：只勾一个数据源 ⇒ `余额 → 用量 → 余额…`；两个都勾 ⇒ `DS余额 → DS用量 → MP余额 → MP用量 → …`。按可用数据过滤（某项没数据就不进轮换，不会转到空视图）；不勾则固定显示余额/剩余。键 = `displayRotate`。 |
 | 5 | **修 bug：配置读到工作目录里的野文件** | 发布副本里 `DATA_CANDIDATES_TAIL` 是空数组，而候选路径都写成 `DATA_CANDIDATES_TAIL[0] + '.dshw-size.json'` ⇒ 拼出**相对路径** `"undefined.dshw-size.json"`（相对宿主 CWD）。实测会导致设置"改了不生效"。改为 `dataTailCandidates()`，没有 tail 就一条都不加。 |
@@ -189,6 +215,9 @@ dsh-whale-widget/
 
 ## 安装
 
+> 📌 **只想尽快装上？直接看最上面的「安装（三选一 · 均已验证）」**，三条命令复制即用。
+> 本节是逐方式的细节、桌面端注意事项与排错。
+
 ### 官方桌面端（Electron 客户端）请先看这一节 ⚠️
 
 **桌面端读的不是 `web` profile。** 官方桌面客户端用的是 **`desktop` profile**（`%USERPROFILE%\.dsh\profiles\desktop`），而 `dsh plugin` 命令行**按设计拒绝**碰它：
@@ -203,9 +232,9 @@ error: profile "desktop" is managed exclusively by the Electron application
 
 在桌面客户端的会话里可直接说：
 
-> 请使用当前桌面端内置的 `plugin_manager` 安装 `dsh-whale-widget`。先核对当前 profile 和是否已有同名插件；已有安装时先报告来源与版本。按该工具支持的操作完成后，告诉我安装结果及是否需要重启。
+> 请使用当前桌面端内置的 `plugin_manager` 安装 `github:likou123/DeepSeek-Balance-Whale-Widget-Magpie`。先核对当前 profile 和是否已有同名插件；已有安装时先报告来源与版本。按该工具支持的操作完成后，告诉我安装结果及是否需要重启。
 
-`plugin_manager` 的作用域是当前 profile（桌面端为 `desktop`），由宿主使用其自带的包管理器完成安装与挂载登记。需要固定版本时，将安装规格改成 `dsh-whale-widget@<目标版本>`。这条说明用于减少安装前后的无关探索（#194）；不需要自行构造认证 cookie、调用底层 RPC 或改写宿主管理的 profile 文件。工具不可用或操作不受支持时，先说明缺少哪项宿主能力，不绕过桌面端限制改用 `--profile web`。
+`plugin_manager` 的作用域是当前 profile（桌面端为 `desktop`），由宿主使用其自带的包管理器完成安装与挂载登记。需要固定到某个提交时，把安装规格写成 `github:<owner>/<repo>#<commit>`。这条说明用于减少安装前后的无关探索（#194）；不需要自行构造认证 cookie、调用底层 RPC 或改写宿主管理的 profile 文件。工具不可用或操作不受支持时，先说明缺少哪项宿主能力，不绕过桌面端限制改用 `--profile web`。
 
 **首次安装与升级的生效方式**（#162）：
 
@@ -222,9 +251,9 @@ error: profile "desktop" is managed exclusively by the Electron application
 
 桌面端界面里看不到插件版本号时，可以看 `%USERPROFILE%\.dsh\profiles\desktop\package.json` 的 `dsh.profile.bundles` 和同目录的 `pnpm-lock.yaml`。
 
-> 下面方式 A~D 都是 **Web（`dsh web`）** 的安装方式。
+> 下面方式 A~C 都是 **Web（`dsh web`）** 的安装方式。
 
-### 方式 A：已有本插件的完整资源包（本地目录 / 压缩包）（推荐）
+### 方式 A：已有本插件的完整资源包（本地目录 / 压缩包）
 
 适用于别人直接发给你一个 zip，或你手上已有一份解压好的插件目录（目录里应有 `package.json`、`cordis.patch.yml`、`lib/`、`assets/`、`README.md`）。
 
@@ -252,12 +281,12 @@ dsh plugin --profile web add link:D:\Plugins\dsh-whale-widget
 - 资源包自带 `assets/minecraft-exp-orb.wav`、`assets/task-end-a.wav` 等内置资源；**删掉 assets 里的文件会让对应功能静默降级**（无图/无声）
 - 装完同样要重启 `dsh web`，再 F5 刷新浏览器
 
-### 方式 B：直接从 GitHub 安装
+### 方式 B：直接从 GitHub 安装 ✅ 已实测
 
 无需本地克隆，一条命令安装：
 
 ```powershell
-dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
+dsh plugin --profile web add github:likou123/DeepSeek-Balance-Whale-Widget-Magpie
 ```
 
 说明：
@@ -265,11 +294,12 @@ dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
 - 装完后插件会出现在 DSH 的**插件管理页面**里，之后可以直接在页面里更新，无需再手动执行命令
 - 网络环境需要代理时，先设置代理环境变量再执行：
   ```powershell
-  $env:http_proxy="http://<ip>:<port>"; $env:https_proxy="http://<ip>:<port>"; $env:all_proxy="socks5://<ip>:<port>"; dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
+  $env:http_proxy="http://<ip>:<port>"; $env:https_proxy="http://<ip>:<port>"; $env:all_proxy="socks5://<ip>:<port>"; dsh plugin --profile web add github:likou123/DeepSeek-Balance-Whale-Widget-Magpie
   ```
-- 安装完成后重启 `dsh web`，再 F5 刷新浏览器
+- 装完**重启 `dsh web`**，再 F5 刷新浏览器（桌面端见上一节：必须走 `plugin_manager`）
+- 想固定到某个提交：`github:likou123/DeepSeek-Balance-Whale-Widget-Magpie#<commit>`
 
-### 方式 C：本地安装（从当前仓库）
+### 方式 C：本地安装（从当前仓库）✅ 已实测
 
 在**仓库根目录**（`package.json` 所在目录）执行：
 
@@ -288,17 +318,15 @@ dsh plugin --profile web add link:.
 - 安装完成后重启 `dsh web`，再 F5 刷新浏览器
 - **移动了源码目录**后必须重新执行一次 `add link:<新路径>`；若提示冲突，先 `dsh plugin --profile web remove dsh-whale-widget` 再 add
 
-### 方式 D：发布到 npm 后安装
+### 方式 D：从 npm 安装（本项目暂不支持 ⚠️）
 
-```powershell
-dsh plugin --profile web add dsh-whale-widget
-```
+本项目**没有发布到 npm**：包名 `dsh-whale-widget` 属于上游，`npm add dsh-whale-widget` 装到的是**上游原版**（没有 Magpie 适配）。请用上面的方式 A/B/C；若你确实需要 npm 渠道，可以自行把本仓库发布到你自己的 scope，再 `dsh plugin --profile web add @<你的scope>/dsh-whale-widget`。
 
 ### 给 AI 的安装说明（Web 使用；桌面端使用上面的 `plugin_manager` 提示）
 
 ```
-请帮我安装插件 dsh-whale-widget。可能的来源有两种：GitHub 仓库
-MeteorNOX/DeepSeek-Balance-Whale-Widget，或者我本地已经有这个插件的「完整资源包」。
+请帮我安装插件 dsh-whale-widget（本项目为 Magpie 适配版）。可能的来源有两种：GitHub 仓库
+likou123/DeepSeek-Balance-Whale-Widget-Magpie，或者我本地已经有这个插件的「完整资源包」。
 
 先确认运行形态：如果当前是官方桌面客户端，请使用宿主内置 plugin_manager，
 不要执行下面的 Web 命令，也不要自行构造认证/RPC或修改 desktop profile。
@@ -309,7 +337,7 @@ MeteorNOX/DeepSeek-Balance-Whale-Widget，或者我本地已经有这个插件�
 2. 在 Web profile 安装（按我实际拿到的来源任选一种）：
 
    【来源一：从 GitHub 安装】
-     dsh plugin --profile web add github:MeteorNOX/DeepSeek-Balance-Whale-Widget
+     dsh plugin --profile web add github:likou123/DeepSeek-Balance-Whale-Widget-Magpie
    或从本地 git 仓库链接安装：
      dsh plugin --profile web add link:<仓库绝对路径>
    （注意：仓库根目录就是插件包，不要写成 link:.\dsh-whale-widget 这种带子目录的路径）
